@@ -1,8 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ClientPlayer } from './models/client-player.type'
+import type { GamePhase } from './models/game-phase.type'
 import type { RatingItem } from './models/rating-item.type'
 import { useGameClient } from './hooks/use-game-client'
+
+const PHASE_TIMER_SECONDS: Record<GamePhase, number | null> = {
+  lobby: null,
+  writing: 45,
+  voting: 25,
+  rating: 30,
+  scoreboard: 8,
+  finished: null
+}
+
+const TIMER_RING_R = 42
+const TIMER_RING_C = 2 * Math.PI * TIMER_RING_R
 
 const DEFAULT_ROUNDS: number = 4
 const DEFAULT_BOTS: number = 1
@@ -74,6 +87,27 @@ function App(): ReactElement {
       ? gameState.currentDuel.votesByPlayerId[session.playerId]
       : undefined
   const hasVotedCurrentDuel = Boolean(myVoteSide)
+  const isDuelParticipant = Boolean(
+    session &&
+      gameState?.currentDuel &&
+      (session.playerId === gameState.currentDuel.leftPlayerId ||
+        session.playerId === gameState.currentDuel.rightPlayerId)
+  )
+  const canVoteCurrentDuel = Boolean(
+    gameState?.phase === 'voting' && gameState.currentDuel && !isDuelParticipant && !hasVotedCurrentDuel
+  )
+  const showVoteBreakdown = Boolean(
+    gameState?.currentDuel &&
+      (isDuelParticipant || hasVotedCurrentDuel) &&
+      Object.keys(gameState.currentDuel?.votesByPlayerId ?? {}).length > 0
+  )
+  const timerTotalSeconds = gameState ? PHASE_TIMER_SECONDS[gameState.phase] : null
+  const timerFraction =
+    timerTotalSeconds != null &&
+    gameState?.timerSecondsLeft != null &&
+    timerTotalSeconds > 0
+      ? Math.max(0, Math.min(1, gameState.timerSecondsLeft / timerTotalSeconds))
+      : null
 
   useEffect(() => {
     if (gameState?.phase === 'rating') {
@@ -136,7 +170,7 @@ function App(): ReactElement {
     if (!session || !gameState?.currentDuel) {
       return
     }
-    if (hasVotedCurrentDuel) {
+    if (isDuelParticipant || hasVotedCurrentDuel) {
       return
     }
     executeCastVote({
@@ -204,16 +238,37 @@ function App(): ReactElement {
             </p>
           </div>
           <div className="headerActions">
-            <div className="timerWrap" aria-label="Time left in this phase">
-              <span className="timerLabel">Time</span>
-              {gameState.timerSecondsLeft != null ? (
-                <>
-                  <span className="timerValue">{gameState.timerSecondsLeft}</span>
-                  <span className="timerSuffix">s</span>
-                </>
-              ) : (
-                <span className="timerValue timerValueIdle">—</span>
-              )}
+            <div className="timerHud" aria-label="Оставшееся время фазы">
+              <svg className="timerRingSvg" viewBox="0 0 100 100" aria-hidden>
+                <defs>
+                  <linearGradient id="timerRingGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#45c8ff" />
+                    <stop offset="100%" stopColor="#a78bfa" />
+                  </linearGradient>
+                </defs>
+                <circle className="timerRingTrack" cx="50" cy="50" r={TIMER_RING_R} />
+                {timerFraction != null && gameState.timerSecondsLeft != null ? (
+                  <circle
+                    className="timerRingProgress"
+                    cx="50"
+                    cy="50"
+                    r={TIMER_RING_R}
+                    stroke="url(#timerRingGrad)"
+                    strokeDasharray={TIMER_RING_C}
+                    strokeDashoffset={TIMER_RING_C * (1 - timerFraction)}
+                    transform="rotate(-90 50 50)"
+                  />
+                ) : null}
+              </svg>
+              <div className="timerHudCenter">
+                <span className="timerHudLabel">Осталось</span>
+                {gameState.timerSecondsLeft != null ? (
+                  <span className="timerHudValue">{gameState.timerSecondsLeft}</span>
+                ) : (
+                  <span className="timerHudIdle">—</span>
+                )}
+                <span className="timerHudUnit">сек</span>
+              </div>
             </div>
             <button className="secondary leaveButton" onClick={executeLeaveRoom}>
               Leave room
@@ -278,30 +333,60 @@ function App(): ReactElement {
         {gameState.phase === 'voting' && gameState.currentDuel && (
           <div className="phaseBlock">
             <p className="subtitle">
-              Duel {gameState.duelIndex + 1} of {gameState.duelCount}
+              Дуэль {gameState.duelIndex + 1} из {gameState.duelCount}
             </p>
+            {isDuelParticipant ? (
+              <p className="subtitle voteHint">Вы участвуете в этой дуэли — голосуют только зрители.</p>
+            ) : (
+              <p className="subtitle voteHint">Варианты без имён — так объективнее.</p>
+            )}
             <h2>{gameState.currentDuel.prompt}</h2>
-            {hasVotedCurrentDuel && myVoteSide && (
-              <p className="voteStatus">Your vote: {myVoteSide === 'left' ? 'left option' : 'right option'}</p>
+            {hasVotedCurrentDuel && myVoteSide && !isDuelParticipant && (
+              <p className="voteStatus">
+                Ваш голос: {myVoteSide === 'left' ? 'вариант A' : 'вариант B'}
+              </p>
             )}
             <button
               type="button"
-              className={`voteOption ${hasVotedCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'left' ? 'voteSelected' : ''}`}
-              disabled={hasVotedCurrentDuel}
+              className={`voteOption ${!canVoteCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'left' ? 'voteSelected' : ''}`}
+              disabled={!canVoteCurrentDuel}
               onClick={() => handleVote('left')}
             >
-              <span>{gameState.currentDuel.leftAnswer}</span>
-              <small>{getPlayerNameById(gameState.players, gameState.currentDuel.leftPlayerId)}</small>
+              <span className="voteOptionMeta">
+                <span className="voteOptionTag">Вариант A</span>
+                {isDuelParticipant && session?.playerId === gameState.currentDuel.leftPlayerId ? (
+                  <span className="voteSelfMark">Ваш ответ</span>
+                ) : null}
+              </span>
+              <span className="voteOptionBody">{gameState.currentDuel.leftAnswer}</span>
             </button>
             <button
               type="button"
-              className={`voteOption ${hasVotedCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'right' ? 'voteSelected' : ''}`}
-              disabled={hasVotedCurrentDuel}
+              className={`voteOption ${!canVoteCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'right' ? 'voteSelected' : ''}`}
+              disabled={!canVoteCurrentDuel}
               onClick={() => handleVote('right')}
             >
-              <span>{gameState.currentDuel.rightAnswer}</span>
-              <small>{getPlayerNameById(gameState.players, gameState.currentDuel.rightPlayerId)}</small>
+              <span className="voteOptionMeta">
+                <span className="voteOptionTag">Вариант B</span>
+                {isDuelParticipant && session?.playerId === gameState.currentDuel.rightPlayerId ? (
+                  <span className="voteSelfMark">Ваш ответ</span>
+                ) : null}
+              </span>
+              <span className="voteOptionBody">{gameState.currentDuel.rightAnswer}</span>
             </button>
+            {showVoteBreakdown && gameState.currentDuel ? (
+              <div className="voteBreakdown">
+                <p className="voteBreakdownTitle">Кто за что голосовал</p>
+                <ul className="voteBreakdownList">
+                  {Object.entries(gameState.currentDuel.votesByPlayerId).map(([voterId, side]) => (
+                    <li key={voterId}>
+                      <span>{getPlayerNameById(gameState.players, voterId)}</span>
+                      <span className="voteBreakdownSide">{side === 'left' ? 'A' : 'B'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         )}
 

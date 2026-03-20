@@ -40,9 +40,20 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly server!: Server
 
   public constructor(private readonly gameService: GameService) {
-    this.gameService.setBroadcast((roomCode, state) => {
-      this.server.to(roomCode).emit('gameState', state)
+    this.gameService.setBroadcast((roomCode) => {
+      void this.emitPersonalizedGameState(roomCode)
     })
+  }
+
+  private async emitPersonalizedGameState(roomCode: string): Promise<void> {
+    const sockets = await this.server.in(roomCode).fetchSockets()
+    for (const socket of sockets) {
+      const session = this.gameService.getSessionBySocket(socket.id)
+      if (!session) {
+        continue
+      }
+      socket.emit('gameState', this.gameService.getStateForPlayer(roomCode, session.playerId))
+    }
   }
 
   public handleConnection(client: Socket): void {
@@ -57,7 +68,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
         playerId: String(query.playerId)
       })
       client.join(String(query.roomCode))
-      const state = this.gameService.getState(String(query.roomCode))
+      const state = this.gameService.getStateForPlayer(String(query.roomCode), String(query.playerId))
       client.emit('gameState', state)
     } catch {}
   }
@@ -76,7 +87,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     })
     client.join(session.roomCode)
     client.emit('session', session)
-    client.emit('gameState', this.gameService.getState(session.roomCode))
+    client.emit('gameState', this.gameService.getStateForPlayer(session.roomCode, session.playerId))
   }
 
   @SubscribeMessage('joinRoom')
@@ -88,7 +99,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     })
     client.join(session.roomCode)
     client.emit('session', session)
-    client.emit('gameState', this.gameService.getState(session.roomCode))
+    client.emit('gameState', this.gameService.getStateForPlayer(session.roomCode, session.playerId))
   }
 
   @SubscribeMessage('startGame')

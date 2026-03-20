@@ -34,3 +34,19 @@ if ($publicUrl) {
 } else {
   Write-Warning "Could not read URL from http://127.0.0.1:4040. Check: docker logs punchme-ngrok"
 }
+
+if ($env:PUNCHME_NO_LOG_WINDOW -eq "1") {
+  Write-Host ""
+  Write-Host "Log stream skipped (PUNCHME_NO_LOG_WINDOW=1). Run: npm run start:all:logs"
+  exit 0
+}
+
+Write-Host ""
+Write-Host "Opening log stream in a new window. Set PUNCHME_NO_LOG_WINDOW=1 to skip."
+Write-Host "Or in this terminal: npm run start:all:logs"
+$logExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
+Start-Process -FilePath $logExe -WorkingDirectory $PSScriptRoot -ArgumentList @(
+  "-NoProfile",
+  "-ExecutionPolicy", "Bypass",
+  "-File", (Join-Path $PSScriptRoot "start-all-logs.ps1")
+)

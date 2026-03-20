@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { AiService } from '../ai/ai.service'
 import { JokeMemoryService } from '../joke-memory/joke-memory.service'
+import { PromptStarterService } from '../prompt-starter/prompt-starter.service'
 import {
   BOT_COUNT_MAX,
   BOT_COUNT_MIN,
@@ -29,23 +30,9 @@ import {
   normalizeAnswer
 } from './game.utils'
 
-type BroadcastFn = (roomCode: string, state: ClientGameState) => void
+type BroadcastFn = (roomCode: string) => void
 
 const BOT_STYLES: readonly string[] = ['sarcastic', 'chaotic', 'dark', 'absurd', 'bold'] as const
-const LOCAL_FALLBACK_PROMPTS: readonly [string, string] = [
-  'Когда я открыл холодильник ночью, он потребовал:',
-  'На собеседовании я честно сказал, что:'
-]
-const EXTENDED_LOCAL_PROMPTS: readonly string[] = [
-  ...LOCAL_FALLBACK_PROMPTS,
-  'Мой сосед узнал о моём хобби и теперь:',
-  'Я подумал, что это шутка, но официант:',
-  'В аэропорту меня остановили из-за:',
-  'Когда я открыл чат с поддержкой, она первой написала:',
-  'Я пообещал себе начать спортзал, и в тот же день:',
-  'Мой умный дом внезапно запретил мне:',
-  'В такси я сказал "по-быстрому", и водитель:'
-]
 const LOCAL_FALLBACK_ANSWER: string = 'это звучало лучше в моей голове.'
 
 @Injectable()
@@ -59,7 +46,8 @@ export class GameService {
 
   public constructor(
     private readonly aiService: AiService,
-    private readonly jokeMemoryService: JokeMemoryService
+    private readonly jokeMemoryService: JokeMemoryService,
+    private readonly promptStarterService: PromptStarterService
   ) {}
 
   public setBroadcast(fn: BroadcastFn): void {
@@ -83,6 +71,7 @@ export class GameService {
       phase: 'lobby',
       roundIndex: 0,
       prompts: [],
+      usedPromptTexts: [],
       promptAssignments: new Map(),
       submissions: new Map(),
       duels: [],
@@ -192,9 +181,9 @@ export class GameService {
     return { roomCode: link.roomCode, playerId: link.playerId }
   }
 
-  public getState(roomCode: string): ClientGameState {
+  public getStateForPlayer(roomCode: string, playerId: string): ClientGameState {
     const room = this.getRoomOrFail(roomCode)
-    return this.toClientState(room)
+    return this.toClientState(room, playerId)
   }
 
   private createBots(room: GameRoom): void {
@@ -290,7 +279,7 @@ export class GameService {
     if (!room) {
       return
     }
-    this.broadcastState(roomCode, this.toClientState(room))
+    this.broadcastState(roomCode)
   }
 
   private async startWritingPhase(roomCode: string): Promise<void> {
@@ -305,7 +294,12 @@ export class GameService {
     room.submissions = new Map()
     const playerIds = Array.from(room.players.keys())
     const playerCount = playerIds.length
-    room.prompts = await this.generateSafePromptList(playerCount)
+    const prompts = await this.promptStarterService.selectPrompts({
+      count: playerCount,
+      excludedTexts: room.usedPromptTexts
+    })
+    room.prompts = prompts
+    room.usedPromptTexts.push(...prompts)
     room.promptAssignments = buildCircularPromptAssignments(playerIds)
     room.players.forEach((player) => {
       const assignment = room.promptAssignments.get(player.id)
@@ -316,6 +310,7 @@ export class GameService {
     })
     this.emitRoomState(room.code)
     this.generateBotAnswers(room)
+    this.promptStarterService.generateAndStoreInBackground()
     this.setRoomTimer(room, WRITING_PHASE_SECONDS, () => this.startVotingPhase(room.code))
   }
 
@@ -362,30 +357,9 @@ export class GameService {
     return BOT_STYLES[Math.floor(Math.random() * BOT_STYLES.length)]
   }
 
-  private async generateSafePromptList(count: number): Promise<readonly string[]> {
-    if (count <= 0) {
-      return []
-    }
-    const timeoutPromise = new Promise<readonly string[]>((resolve) => {
-      setTimeout(() => resolve(this.buildLocalFallbackPromptList(count)), 4500)
-    })
-    const aiPromise = this.aiService.generatePromptList(count)
-    return Promise.race([aiPromise, timeoutPromise]).catch(() => this.buildLocalFallbackPromptList(count))
-  }
-
-  private buildLocalFallbackPromptList(count: number): readonly string[] {
-    const result: string[] = []
-    for (let index = 0; index < count; index += 1) {
-      const base = EXTENDED_LOCAL_PROMPTS[index % EXTENDED_LOCAL_PROMPTS.length]
-      const cycle = Math.floor(index / EXTENDED_LOCAL_PROMPTS.length)
-      result.push(cycle === 0 ? base : `${base} (${cycle + 1})`)
-    }
-    return result
-  }
-
   private async generateSafeBotAnswer(prompt: string): Promise<string> {
     const timeoutPromise = new Promise<string>((resolve) => {
-      setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 4500)
+      setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 90000)
     })
     const aiPromise = this.aiService
       .generateBotAnswer({ prompt, styleTag: this.getBotStyle() })
@@ -553,7 +527,7 @@ export class GameService {
     void this.startWritingPhase(room.code)
   }
 
-  private toClientState(room: GameRoom): ClientGameState {
+  private toClientState(room: GameRoom, viewerPlayerId: string): ClientGameState {
     return {
       roomCode: room.code,
       phase: room.phase,
@@ -565,7 +539,7 @@ export class GameService {
         playerId,
         promptIndices
       })),
-      currentDuel: this.toClientDuel(room),
+      currentDuel: this.toClientDuel(room, viewerPlayerId),
       duelIndex: room.phase === 'voting' ? room.duelIndex : 0,
       duelCount: room.phase === 'voting' ? room.duels.length : 0,
       writingSubmitters: this.getWritingSubmitters(room),
@@ -604,7 +578,7 @@ export class GameService {
       .sort((a, b) => b.score - a.score)
   }
 
-  private toClientDuel(room: GameRoom): ClientDuel | null {
+  private toClientDuel(room: GameRoom, viewerPlayerId: string): ClientDuel | null {
     if (room.phase !== 'voting') {
       return null
     }
@@ -616,6 +590,8 @@ export class GameService {
     const rightSubmission = room.submissions.get(duel.rightPlayerId)
     const leftAnswer = leftSubmission ? getAnswerForPromptIndex(leftSubmission, duel.promptIndex) : ''
     const rightAnswer = rightSubmission ? getAnswerForPromptIndex(rightSubmission, duel.promptIndex) : ''
+    const fullVotes = Object.fromEntries(duel.votes) as Record<string, 'left' | 'right'>
+    const votesByPlayerId = this.filterVotesForViewer(duel, viewerPlayerId, fullVotes)
     return {
       id: duel.id,
       prompt: room.prompts[duel.promptIndex],
@@ -623,8 +599,22 @@ export class GameService {
       rightPlayerId: duel.rightPlayerId,
       leftAnswer,
       rightAnswer,
-      votesByPlayerId: Object.fromEntries(duel.votes) as Record<string, 'left' | 'right'>
+      votesByPlayerId
     }
+  }
+
+  private filterVotesForViewer(
+    duel: { readonly leftPlayerId: string; readonly rightPlayerId: string },
+    viewerPlayerId: string,
+    fullVotes: Readonly<Record<string, 'left' | 'right'>>
+  ): Readonly<Record<string, 'left' | 'right'>> {
+    if (viewerPlayerId === duel.leftPlayerId || viewerPlayerId === duel.rightPlayerId) {
+      return fullVotes
+    }
+    if (fullVotes[viewerPlayerId]) {
+      return fullVotes
+    }
+    return {}
   }
 
   private getTimerSecondsLeft(timerEndsAt: number | null): number | null {

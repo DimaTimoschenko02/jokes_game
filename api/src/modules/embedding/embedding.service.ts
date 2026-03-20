@@ -1,13 +1,15 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { EmbeddingResult } from './models/embedding-result.type'
 import { OllamaEmbeddingResponse } from './models/ollama-embedding-response.type'
 
-const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://host.docker.internal:11434'
+const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
 const OLLAMA_EMBED_MODEL: string = process.env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text'
-const EMBED_TIMEOUT_MS: number = 6000
+const EMBED_TIMEOUT_MS: number = 15000
 
 @Injectable()
 export class EmbeddingService {
+  private readonly logger: Logger = new Logger(EmbeddingService.name)
+
   public async executeEmbedText(input: { readonly text: string }): Promise<EmbeddingResult | null> {
     const payload = this.normalizeText(input.text)
     if (!payload) {
@@ -38,14 +40,27 @@ export class EmbeddingService {
         body: JSON.stringify({ model: OLLAMA_EMBED_MODEL, prompt: text })
       })
       if (!response.ok) {
+        const detail = await response.text().catch(() => '')
+        this.logger.warn(
+          `ollama_embed http_status=${response.status} model=${OLLAMA_EMBED_MODEL} body=${detail.slice(0, 200)}`
+        )
         return null
       }
       const json = (await response.json()) as OllamaEmbeddingResponse
       if (!json.embedding || json.embedding.length === 0) {
+        this.logger.warn(`ollama_embed empty_vector model=${OLLAMA_EMBED_MODEL}`)
         return null
       }
       return json.embedding
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        const kind = error.name === 'AbortError' ? 'timeout_or_abort' : error.name
+        this.logger.warn(
+          `ollama_embed ${kind} message=${error.message} model=${OLLAMA_EMBED_MODEL} url=${OLLAMA_BASE_URL}`
+        )
+      } else {
+        this.logger.warn(`ollama_embed error=${String(error)} url=${OLLAMA_BASE_URL}`)
+      }
       return null
     } finally {
       clearTimeout(timeoutHandle)

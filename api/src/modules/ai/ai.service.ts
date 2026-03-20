@@ -1,10 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { JokeMemoryService } from '../joke-memory/joke-memory.service'
 import { z } from 'zod'
 import { AiBotAnswerInput } from './models/ai-bot-answer-input.type'
 import { AiMemoryExample } from './models/ai-memory-example.type'
 import { AiMessage } from './models/ai-message.type'
-import { AiPromptPair } from './models/ai-prompt-pair.type'
 import { OllamaChatResponse } from './models/ollama-chat-response.type'
 import {
   BOT_PUNCHLINE_SYSTEM_PROMPT,
@@ -13,22 +12,14 @@ import {
   createPromptListUserPrompt
 } from './prompts/prompt-templates'
 
-const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://host.docker.internal:11434'
+const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
 const OLLAMA_MODEL: string =
-  process.env.OLLAMA_MODEL ?? 'hf.co/TheBloke/WizardLM-13B-Uncensored-GGUF:Q4_K_M'
-const OLLAMA_TIMEOUT_MS: number = 6000
+  process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen2.5-abliterate:1.5b'
+const OLLAMA_TIMEOUT_MS: number = 90000
 const MEMORY_EXAMPLES_LIMIT: number = 4
 const METRICS_LOG_INTERVAL: number = 20
 
 const botAnswerSchema = z.string().min(1).max(140)
-
-const FALLBACK_PROMPTS: readonly string[] = [
-  'Когда я открыл холодильник ночью, он потребовал:',
-  'На собеседовании меня спросили о слабых сторонах, и я ответил:',
-  'Мой умный дом внезапно запретил мне:',
-  'Я решил начать новую жизнь, но уже утром:',
-  'В такси я сказал "по-быстрому", и водитель:'
-] as const
 
 const FALLBACK_PUNCHLINES: readonly string[] = [
   'это был смелый план ровно до первой минуты.',
@@ -39,7 +30,7 @@ const FALLBACK_PUNCHLINES: readonly string[] = [
 ] as const
 
 @Injectable()
-export class AiService {
+export class AiService implements OnModuleInit {
   private readonly logger: Logger = new Logger(AiService.name)
   private totalBotRequests: number = 0
   private totalBotLatencyMs: number = 0
@@ -47,28 +38,26 @@ export class AiService {
 
   public constructor(private readonly jokeMemoryService: JokeMemoryService) {}
 
-  public async generatePromptPair(): Promise<AiPromptPair> {
-    const list = await this.generatePromptList(2)
-    return { first: list[0]!, second: list[1]! }
+  public onModuleInit(): void {
+    void this.probeOllamaOnStartup()
   }
 
-  public async generatePromptList(count: number): Promise<readonly string[]> {
+  public async generatePromptList(
+    count: number,
+    excludedPrompts: readonly string[] = []
+  ): Promise<readonly string[]> {
     if (count <= 0) {
       return []
     }
     const content = await this.executeChatRequest({
       messages: [
         { role: 'system', content: PROMPT_GENERATION_SYSTEM_PROMPT },
-        { role: 'user', content: createPromptListUserPrompt(count) }
+        { role: 'user', content: createPromptListUserPrompt(count, excludedPrompts) }
       ],
       maxTokens: Math.min(80 * count + 80, 900),
       temperature: 1.05
     })
-    const parsed = this.parsePromptList(content, count)
-    if (parsed) {
-      return this.ensureDistinctPromptList(parsed)
-    }
-    return this.createFallbackPromptList(count)
+    return this.parsePromptList(content, count) ?? []
   }
 
   public async generateBotAnswer(input: AiBotAnswerInput): Promise<string> {
@@ -90,6 +79,65 @@ export class AiService {
     this.fallbackResponses += 1
     this.maybeLogMetrics()
     return this.getRandomItem(FALLBACK_PUNCHLINES)
+  }
+
+  private async probeOllamaOnStartup(): Promise<void> {
+    const url = `${OLLAMA_BASE_URL}/api/tags`
+    const abortController = new AbortController()
+    const timeoutHandle = setTimeout(() => abortController.abort(), 5000)
+    try {
+      const response = await fetch(url, { signal: abortController.signal })
+      if (!response.ok) {
+        this.logger.warn(`ollama_probe http_status=${response.status} url=${OLLAMA_BASE_URL}`)
+        return
+      }
+      const data = (await response.json()) as { models?: readonly { name: string }[] }
+      const names = data.models?.map((item) => item.name) ?? []
+      const modelListed = names.some((name) => name === OLLAMA_MODEL || name.endsWith(OLLAMA_MODEL))
+      this.logger.log(
+        `ollama_ready url=${OLLAMA_BASE_URL} chat_model=${OLLAMA_MODEL} tags_count=${names.length}`
+      )
+      if (names.length > 0 && !modelListed) {
+        this.logger.warn(
+          `ollama_probe model_not_in_tags chat_model=${OLLAMA_MODEL} hint=set OLLAMA_MODEL to one of loaded names`
+        )
+      }
+    } catch (error: unknown) {
+      this.logOllamaProbeFailure(error)
+    } finally {
+      clearTimeout(timeoutHandle)
+    }
+  }
+
+  private getFetchErrorCauseSuffix(error: unknown): string {
+    if (!(error instanceof Error) || !('cause' in error)) {
+      return ''
+    }
+    const c = (error as Error & { cause?: unknown }).cause
+    return c != null ? ` cause=${String(c)}` : ''
+  }
+
+  private logOllamaProbeFailure(error: unknown): void {
+    const cause = this.getFetchErrorCauseSuffix(error)
+    if (error instanceof Error) {
+      const kind = error.name === 'AbortError' ? 'timeout_or_abort' : error.name
+      this.logger.warn(
+        `ollama_probe ${kind} message=${error.message}${cause} url=${OLLAMA_BASE_URL} | ` +
+          'hint=Start Ollama (docker compose up ollama), pull models: npm run docker:pull-model. Override: OLLAMA_BASE_URL in .env. Run: npm run check:ollama'
+      )
+      return
+    }
+    this.logger.warn(`ollama_probe error=${String(error)} url=${OLLAMA_BASE_URL}`)
+  }
+
+  private logOllamaError(context: string, error: unknown): void {
+    const cause = this.getFetchErrorCauseSuffix(error)
+    if (error instanceof Error) {
+      const kind = error.name === 'AbortError' ? 'timeout_or_abort' : error.name
+      this.logger.warn(`${context} ${kind} message=${error.message}${cause} url=${OLLAMA_BASE_URL}`)
+      return
+    }
+    this.logger.warn(`${context} error=${String(error)} url=${OLLAMA_BASE_URL}`)
   }
 
   private async executeChatRequest(input: {
@@ -116,15 +164,21 @@ export class AiService {
         })
       })
       if (!response.ok) {
-        throw new Error(`Ollama request failed: ${response.status}`)
+        const detail = await response.text().catch(() => '')
+        this.logger.warn(
+          `ollama_chat http_status=${response.status} model=${OLLAMA_MODEL} body=${detail.slice(0, 200)}`
+        )
+        return ''
       }
       const json = (await response.json()) as OllamaChatResponse
       const content = this.normalizeText(json.message?.content ?? '', 400)
       if (!content) {
-        throw new Error('Ollama returned empty content')
+        this.logger.warn(`ollama_chat empty_content model=${OLLAMA_MODEL}`)
+        return ''
       }
       return content
-    } catch {
+    } catch (error: unknown) {
+      this.logOllamaError('ollama_chat', error)
       return ''
     } finally {
       clearTimeout(timeoutHandle)
@@ -154,65 +208,6 @@ export class AiService {
       return result.success ? result.data : null
     }
     return null
-  }
-
-  private ensureDistinctPromptList(values: readonly string[]): readonly string[] {
-    const used = new Set<string>()
-    const result: string[] = []
-    values.forEach((value) => {
-      let next = value
-      let identity = this.normalizePromptIdentity(next)
-      let guard = 0
-      while (used.has(identity) && guard < 24) {
-        next = this.getAlternativePrompt(next)
-        identity = this.normalizePromptIdentity(next)
-        guard += 1
-      }
-      if (used.has(identity)) {
-        next = `${next} (${result.length + 1})`
-        identity = this.normalizePromptIdentity(next)
-      }
-      used.add(identity)
-      result.push(next)
-    })
-    return result
-  }
-
-  private createFallbackPromptList(count: number): readonly string[] {
-    const result: string[] = []
-    for (let index = 0; index < count; index += 1) {
-      let candidate = this.getRandomItem(FALLBACK_PROMPTS)
-      let guard = 0
-      while (
-        result.some((item) => this.normalizePromptIdentity(item) === this.normalizePromptIdentity(candidate)) &&
-        guard < 40
-      ) {
-        candidate = this.getRandomItem(FALLBACK_PROMPTS)
-        guard += 1
-      }
-      if (result.some((item) => this.normalizePromptIdentity(item) === this.normalizePromptIdentity(candidate))) {
-        candidate = `${candidate} (${index + 1})`
-      }
-      result.push(candidate)
-    }
-    return this.ensureDistinctPromptList(result)
-  }
-
-  private normalizePromptIdentity(value: string): string {
-    return value
-      .toLocaleLowerCase('ru-RU')
-      .replace(/[!?.:,;'"«»()[\]{}]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-  }
-
-  private getAlternativePrompt(current: string): string {
-    const currentIdentity = this.normalizePromptIdentity(current)
-    const candidates = FALLBACK_PROMPTS.filter((item) => this.normalizePromptIdentity(item) !== currentIdentity)
-    if (candidates.length === 0) {
-      return `${current} (ещё)`
-    }
-    return this.getRandomItem(candidates)
   }
 
   private getRandomItem(list: readonly string[]): string {

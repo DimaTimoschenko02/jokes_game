@@ -5,11 +5,12 @@
   "scripts": {
     "start:all": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-all.ps1",
     "restart:all": "docker compose down && npm run start:all",
-    "start:all:logs": "docker compose --profile tunnel up --build",
+    "start:all:logs": "powershell -NoProfile -ExecutionPolicy Bypass -File ./start-all-logs.ps1",
+    "check:ollama": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/check-ollama.ps1",
     "docker:pull-model": "docker compose --profile setup run --rm model-pull",
     "docker:up": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "docker:logs": "docker compose logs -f --tail=200",
+    "docker:logs": "docker compose --profile tunnel logs -f --tail=200",
     "docker:ngrok": "docker compose --profile tunnel up -d ngrok",
     "ngrok:up": "ngrok http 5173",
     "ngrok:url": "node scripts/ngrok-url.cjs"

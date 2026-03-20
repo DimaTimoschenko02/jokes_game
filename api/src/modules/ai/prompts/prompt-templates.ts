@@ -9,13 +9,21 @@ export const PROMPT_GENERATION_USER_PROMPT: string = [
   'No markdown and no explanation.'
 ].join('\n')
 
-export const createPromptListUserPrompt = (count: number): string =>
-  [
+export const createPromptListUserPrompt = (count: number, excludedPrompts: readonly string[]): string => {
+  const lines = [
     `Return strict JSON array with exactly ${count} strings.`,
     'Each string must be a distinct unfinished sentence for joke completion.',
     'Strings must be unique and must not repeat the same idea.',
     'No markdown and no explanation.'
-  ].join('\n')
+  ]
+  if (excludedPrompts.length > 0) {
+    lines.push(
+      'Do not reuse or paraphrase any of these sentences (including same setup or punchline setup):',
+      ...excludedPrompts.map((item, index) => `${index + 1}. ${item}`)
+    )
+  }
+  return lines.join('\n')
+}
 
 export const BOT_PUNCHLINE_SYSTEM_PROMPT: string = [
   'You are a witty player in a humor game.',
