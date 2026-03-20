@@ -528,6 +528,7 @@ export class GameService {
     if (!room || room.phase !== 'rating') {
       return
     }
+    this.clearRoomTimer(room)
     this.persistRoundRatings(room)
     this.startScoreboardPhase(room)
   }
@@ -740,16 +741,11 @@ export class GameService {
 
   private hasAllRatings(room: GameRoom): boolean {
     const eligiblePlayers = Array.from(room.players.values()).filter((player) => !player.isBot)
-    return eligiblePlayers.every((player) => this.hasPlayerRatedAll(room, player.id))
+    return eligiblePlayers.every((player) => this.hasPlayerSubmittedRatings(room, player.id))
   }
 
-  private hasPlayerRatedAll(room: GameRoom, playerId: string): boolean {
-    const required = room.ratingItems.filter((item) => item.authorPlayerId !== playerId)
-    const submission = room.ratingSubmissions.get(playerId)
-    if (!submission) {
-      return false
-    }
-    return required.every((item) => submission.has(item.id))
+  private hasPlayerSubmittedRatings(room: GameRoom, playerId: string): boolean {
+    return room.ratingSubmissions.has(playerId)
   }
 
   private persistRoundRatings(room: GameRoom): void {

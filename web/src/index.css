@@ -119,14 +119,65 @@ button:disabled {
   gap: 10px;
 }
 
-.timer {
-  min-width: 70px;
-  text-align: center;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(138, 167, 255, 0.4);
-  background: rgba(19, 34, 59, 0.8);
+.timerWrap {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  grid-template-rows: auto auto;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 108px;
+  padding: 12px 16px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(130, 170, 255, 0.45);
+  background: linear-gradient(155deg, rgba(28, 44, 78, 0.95) 0%, rgba(14, 22, 38, 0.98) 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35) inset,
+    0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.timerLabel {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8aa4d4;
+}
+
+.timerValue {
+  grid-row: 2;
+  grid-column: 1;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: #e8f0ff;
+  text-shadow: 0 0 24px rgba(108, 200, 255, 0.35);
+}
+
+.timerValueIdle {
+  grid-column: 1 / -1;
+  font-size: 22px;
+  font-weight: 600;
+  color: #6c7fa3;
+  text-shadow: none;
+}
+
+.timerSuffix {
+  grid-row: 2;
+  grid-column: 2;
+  font-size: 14px;
   font-weight: 700;
+  color: #9fb8e8;
+  align-self: end;
+  padding-bottom: 4px;
+}
+
+.ratingHint {
+  margin: -4px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .leaveButton {

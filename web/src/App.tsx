@@ -204,7 +204,17 @@ function App(): ReactElement {
             </p>
           </div>
           <div className="headerActions">
-            <div className="timer">{gameState.timerSecondsLeft ?? '-'}s</div>
+            <div className="timerWrap" aria-label="Time left in this phase">
+              <span className="timerLabel">Time</span>
+              {gameState.timerSecondsLeft != null ? (
+                <>
+                  <span className="timerValue">{gameState.timerSecondsLeft}</span>
+                  <span className="timerSuffix">s</span>
+                </>
+              ) : (
+                <span className="timerValue timerValueIdle">—</span>
+              )}
+            </div>
             <button className="secondary leaveButton" onClick={executeLeaveRoom}>
               Leave room
             </button>
@@ -305,6 +315,7 @@ function App(): ReactElement {
         {gameState.phase === 'rating' && (
           <div className={`phaseBlock ${hasSubmittedRatings ? 'phaseSuccess' : ''}`}>
             <h2>Rate the jokes</h2>
+            <p className="subtitle ratingHint">Scoring is optional — submit to skip or send a partial ballot.</p>
             {hasSubmittedRatings && <p className="confirmBanner">Ratings sent</p>}
             {gameState.ratingItems.map((item) => (
               <div
