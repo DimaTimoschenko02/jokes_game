@@ -1,0 +1,11 @@
+export const ROUND_COUNT_DEFAULT: number = 4
+export const ROUND_COUNT_MIN: number = 3
+export const ROUND_COUNT_MAX: number = 4
+export const BOT_COUNT_MIN: number = 1
+export const BOT_COUNT_MAX: number = 2
+export const WRITING_PHASE_SECONDS: number = 45
+export const VOTING_PHASE_SECONDS: number = 25
+export const RATING_PHASE_SECONDS: number = 30
+export const SCOREBOARD_PHASE_SECONDS: number = 8
+export const PLAYER_NAME_MAX_LENGTH: number = 30
+export const ANSWER_MAX_LENGTH: number = 140

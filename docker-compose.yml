@@ -1,0 +1,73 @@
+services:
+  api:
+    build:
+      context: ./api
+    container_name: punchme-api
+    environment:
+      PORT: 4000
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: hf.co/TheBloke/WizardLM-13B-Uncensored-GGUF:Q4_K_M
+      OLLAMA_EMBED_MODEL: nomic-embed-text
+      MONGO_URI: mongodb://mongo:27017/punchme
+    ports:
+      - '4000:4000'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      - mongo
+
+  web:
+    build:
+      context: ./web
+    container_name: punchme-web
+    environment:
+      VITE_SOCKET_PROXY_TARGET: http://api:4000
+    ports:
+      - '5173:5173'
+    depends_on:
+      - api
+
+  mongo:
+    image: mongo:7
+    container_name: punchme-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - punchme-mongo-data:/data/db
+
+  model-pull:
+    image: curlimages/curl:8.10.1
+    container_name: punchme-model-pull
+    entrypoint:
+      - sh
+      - -c
+      - >
+        curl -sS -X POST http://host.docker.internal:11434/api/pull
+        -H "Content-Type: application/json"
+        -d '{"model":"hf.co/TheBloke/WizardLM-13B-Uncensored-GGUF:Q4_K_M"}'
+        && curl -sS -X POST http://host.docker.internal:11434/api/pull
+        -H "Content-Type: application/json"
+        -d '{"model":"nomic-embed-text"}'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    profiles:
+      - setup
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: punchme-ngrok
+    command:
+      - http
+      - web:5173
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - '4040:4040'
+    depends_on:
+      - web
+    profiles:
+      - tunnel
+
+volumes:
+  punchme-mongo-data:
