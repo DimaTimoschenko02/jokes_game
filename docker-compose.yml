@@ -21,7 +21,7 @@ services:
     environment:
       PORT: 4000
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_MODEL: huihui_ai/qwen2.5-abliterate:1.5b
+      OLLAMA_MODEL: huihui_ai/qwen2.5-abliterate:3b
       OLLAMA_EMBED_MODEL: nomic-embed-text
       MONGO_URI: mongodb://mongo:27017/punchme
     ports:
@@ -64,7 +64,7 @@ services:
       - >
         curl -sS -X POST http://ollama:11434/api/pull
         -H "Content-Type: application/json"
-        -d '{"model":"huihui_ai/qwen2.5-abliterate:1.5b"}'
+        -d '{"model":"huihui_ai/qwen2.5-abliterate:3b"}'
         && curl -sS -X POST http://ollama:11434/api/pull
         -H "Content-Type: application/json"
         -d '{"model":"nomic-embed-text"}'

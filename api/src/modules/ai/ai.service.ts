@@ -14,7 +14,7 @@ import {
 
 const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
 const OLLAMA_MODEL: string =
-  process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen2.5-abliterate:1.5b'
+  process.env.OLLAMA_MODEL ?? 'huihui_ai/qwen2.5-abliterate:3b'
 const OLLAMA_TIMEOUT_MS: number = 90000
 const MEMORY_EXAMPLES_LIMIT: number = 4
 const METRICS_LOG_INTERVAL: number = 20
