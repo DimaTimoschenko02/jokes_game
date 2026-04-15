@@ -40,7 +40,7 @@ export class JokeMemoryDocumentModel {
   @Prop({ required: false, min: 0 })
   public ratingCount?: number
 
-  @Prop({ required: true, enum: ['human', 'bot'] })
+  @Prop({ required: true, type: String, enum: ['human', 'bot'] })
   public source!: JokeMemorySource
 
   @Prop({ required: true, maxlength: 8 })

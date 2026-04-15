@@ -16,6 +16,6 @@ import { PromptStarterDocumentModel, PromptStarterSchema } from './schemas/promp
     AiModule
   ],
   providers: [PromptStarterRepository, PromptStarterService],
-  exports: [PromptStarterService]
+  exports: [PromptStarterService, PromptStarterRepository]
 })
 export class PromptStarterModule {}

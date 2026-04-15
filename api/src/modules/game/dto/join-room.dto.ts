@@ -1,4 +1,4 @@
-import { IsString, Length, MaxLength } from 'class-validator'
+import { IsOptional, IsString, Length, MaxLength } from 'class-validator'
 import { PLAYER_NAME_MAX_LENGTH } from '../constants/game.constants'
 
 export class JoinRoomDto {
@@ -9,4 +9,9 @@ export class JoinRoomDto {
   @IsString()
   @MaxLength(PLAYER_NAME_MAX_LENGTH)
   public name!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  public bio?: string
 }

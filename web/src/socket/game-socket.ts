@@ -6,11 +6,13 @@ export type CreateRoomPayload = {
   readonly name: string
   readonly roundCount: number
   readonly botCount: number
+  readonly bio?: string
 }
 
 export type JoinRoomPayload = {
   readonly roomCode: string
   readonly name: string
+  readonly bio?: string
 }
 
 export type StartGamePayload = {

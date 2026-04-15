@@ -83,7 +83,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
       socketId: client.id,
       name: body.name,
       roundCount: body.roundCount,
-      botCount: body.botCount
+      botCount: body.botCount,
+      bio: body.bio
     })
     client.join(session.roomCode)
     client.emit('session', session)
@@ -95,7 +96,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const session = this.gameService.joinRoom({
       socketId: client.id,
       roomCode: body.roomCode,
-      name: body.name
+      name: body.name,
+      bio: body.bio
     })
     client.join(session.roomCode)
     client.emit('session', session)

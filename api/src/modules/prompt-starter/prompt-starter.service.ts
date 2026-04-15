@@ -2,9 +2,10 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
 import { normalizePromptIdentity } from '../../common/prompt-identity.util'
 import { AiService } from '../ai/ai.service'
 import { SEED_PROMPTS } from './constants/seed-prompts.constant'
+import { PushCompletionInput } from './models/push-completion-input.type'
 import { PromptStarterRepository } from './prompt-starter.repository'
 
-const BACKGROUND_GENERATION_COUNT: number = 10
+const BACKGROUND_GENERATION_COUNT: number = 4
 
 @Injectable()
 export class PromptStarterService implements OnModuleInit {
@@ -41,6 +42,30 @@ export class PromptStarterService implements OnModuleInit {
     return this.fillFromSeed(entries.map((e) => e.text), input.count, input.excludedTexts)
   }
 
+  public pushCompletion(input: PushCompletionInput): void {
+    void this.repository.pushCompletion(input).catch((error: unknown) => {
+      this.logger.warn(`push_completion_failed prompt="${input.promptText.slice(0, 60)}" error=${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
+  public async getGoldenExamples(limit: number): Promise<readonly string[]> {
+    const entries = await this.repository.findGolden(limit)
+    return entries.map((entry) => entry.text)
+  }
+
+  public async getCompletionsForPrompt(promptText: string): Promise<readonly import('./models/prompt-starter-entry.type').PromptCompletion[]> {
+    return this.repository.findBestCompletions({ promptText, limit: 20, minVoteShare: 0 })
+  }
+
+  public async saveGoldenOpening(input: {
+    readonly text: string
+    readonly averageCompletionRating: number
+    readonly averageVoteShare: number
+  }): Promise<void> {
+    await this.repository.upsertGolden(input)
+    this.logger.log(`golden_opening_saved text="${input.text.slice(0, 60)}" rating=${input.averageCompletionRating.toFixed(1)}`)
+  }
+
   public generateAndStoreInBackground(count: number = BACKGROUND_GENERATION_COUNT): void {
     void this.executeBackgroundGeneration(count)
   }
@@ -59,7 +84,7 @@ export class PromptStarterService implements OnModuleInit {
         return true
       })
       if (unique.length > 0) {
-        await this.repository.insertMany(unique)
+        await this.repository.upsertMany(unique)
         this.logger.log(`background_generation stored=${unique.length} duplicates_skipped=${generated.length - unique.length}`)
       }
     } catch (error: unknown) {
@@ -73,7 +98,7 @@ export class PromptStarterService implements OnModuleInit {
       this.logger.log(`seed_skip existing_count=${existingCount}`)
       return
     }
-    await this.repository.insertMany([...SEED_PROMPTS])
+    await this.repository.upsertMany([...SEED_PROMPTS])
     this.logger.log(`seed_complete count=${SEED_PROMPTS.length}`)
   }
 

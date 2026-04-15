@@ -1,13 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import type { ClientPlayer } from './models/client-player.type'
 import type { GamePhase } from './models/game-phase.type'
 import type { RatingItem } from './models/rating-item.type'
 import { useGameClient } from './hooks/use-game-client'
 
+type AppTheme = 'light' | 'gray' | 'dark'
+const THEMES: readonly AppTheme[] = ['light', 'gray', 'dark']
+
+const getStoredTheme = (): AppTheme => {
+  const stored = localStorage.getItem('punchme-theme')
+  return THEMES.includes(stored as AppTheme) ? (stored as AppTheme) : 'light'
+}
+
+const applyTheme = (theme: AppTheme): void => {
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('punchme-theme', theme)
+}
+
 const PHASE_TIMER_SECONDS: Record<GamePhase, number | null> = {
   lobby: null,
-  writing: 45,
+  writing: 120,
   voting: 25,
   rating: 30,
   scoreboard: 8,
@@ -23,19 +36,28 @@ const ROOM_CODE_LENGTH: number = 5
 
 const getPlayerNameById = (players: readonly ClientPlayer[], playerId: string): string => {
   const player = players.find((item) => item.id === playerId)
-  return player?.name ?? 'Unknown'
+  return player?.name ?? '???'
 }
 
 const buildRatingPayload = (ratings: Record<string, number>): readonly { readonly itemId: string; readonly score: number }[] =>
   Object.entries(ratings).map(([itemId, score]) => ({ itemId, score }))
 
-const getRatingLabel = (value: number): string => (value ? `${value}/10` : 'Rate')
+const getRatingLabel = (value: number): string => (value ? `${value}/10` : 'Оценка')
 
 const isOwnJoke = (item: RatingItem, playerId: string | undefined): boolean => item.authorPlayerId === playerId
 
+const getRoomCodeFromUrl = (): string | null => {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('room')?.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_CODE_LENGTH) ?? null
+}
+
+const BIO_KEY = 'punchme-bio'
+const BIO_MAX_LENGTH = 200
+
 function App(): ReactElement {
   const [displayName, setDisplayName] = useState<string>('')
-  const [roomCodeToJoin, setRoomCodeToJoin] = useState<string>('')
+  const [bio, setBio] = useState<string>(() => localStorage.getItem(BIO_KEY) ?? '')
+  const [roomCodeToJoin, setRoomCodeToJoin] = useState<string>(getRoomCodeFromUrl() ?? '')
   const [roundCount, setRoundCount] = useState<number>(DEFAULT_ROUNDS)
   const [botCount, setBotCount] = useState<number>(DEFAULT_BOTS)
   const [answers, setAnswers] = useState<[string, string]>(['', ''])
@@ -43,6 +65,17 @@ function App(): ReactElement {
   const [ratingFlashItemId, setRatingFlashItemId] = useState<string | null>(null)
   const [answersBtnPulse, setAnswersBtnPulse] = useState<boolean>(false)
   const [ratingsBtnPulse, setRatingsBtnPulse] = useState<boolean>(false)
+  const [linkCopied, setLinkCopied] = useState<boolean>(false)
+  const [localTimer, setLocalTimer] = useState<number | null>(null)
+  const [theme, setTheme] = useState<AppTheme>(getStoredTheme)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
+  useEffect(() => {
+    localStorage.setItem(BIO_KEY, bio)
+  }, [bio])
   const {
     gameState,
     session,
@@ -102,13 +135,54 @@ function App(): ReactElement {
       Object.keys(gameState.currentDuel?.votesByPlayerId ?? {}).length > 0
   )
   const timerTotalSeconds = gameState ? PHASE_TIMER_SECONDS[gameState.phase] : null
+  const displaySeconds = localTimer ?? gameState?.timerSecondsLeft ?? null
   const timerFraction =
     timerTotalSeconds != null &&
-    gameState?.timerSecondsLeft != null &&
+    displaySeconds != null &&
     timerTotalSeconds > 0
-      ? Math.max(0, Math.min(1, gameState.timerSecondsLeft / timerTotalSeconds))
+      ? Math.max(0, Math.min(1, displaySeconds / timerTotalSeconds))
       : null
 
+  // Client-side timer countdown
+  useEffect(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    const serverSeconds = gameState?.timerSecondsLeft ?? null
+    if (serverSeconds == null || serverSeconds <= 0) {
+      setLocalTimer(null)
+      return
+    }
+    setLocalTimer(serverSeconds)
+    timerRef.current = setInterval(() => {
+      setLocalTimer((prev) => {
+        if (prev == null || prev <= 1) {
+          if (timerRef.current) {
+            clearInterval(timerRef.current)
+            timerRef.current = null
+          }
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [gameState?.timerSecondsLeft, gameState?.phase, gameState?.duelIndex])
+
+  // Reset answers between rounds
+  useEffect(() => {
+    if (gameState?.phase === 'writing') {
+      setAnswers(['', ''])
+    }
+  }, [gameState?.roundIndex])
+
+  // Reset ratings between rounds
   useEffect(() => {
     if (gameState?.phase === 'rating') {
       setRatings({})
@@ -119,14 +193,16 @@ function App(): ReactElement {
     executeCreateRoom({
       name: displayName.trim() || 'Host',
       roundCount,
-      botCount
+      botCount,
+      bio: bio.trim() || undefined
     })
   }
 
   const handleJoinRoom = (): void => {
     executeJoinRoom({
       roomCode: roomCodeToJoin.toUpperCase().slice(0, ROOM_CODE_LENGTH),
-      name: displayName.trim() || 'Player'
+      name: displayName.trim() || 'Player',
+      bio: bio.trim() || undefined
     })
   }
 
@@ -180,27 +256,73 @@ function App(): ReactElement {
     })
   }
 
+  const handleCopyRoomLink = useCallback((): void => {
+    if (!session) {
+      return
+    }
+    const url = new URL(window.location.href)
+    url.searchParams.set('room', session.roomCode)
+    void navigator.clipboard.writeText(url.toString()).then(() => {
+      setLinkCopied(true)
+      window.setTimeout(() => setLinkCopied(false), 2000)
+    })
+  }, [session])
+
+  const themeSwitcher = (
+    <div className="themeSwitcher">
+      {THEMES.map((t) => (
+        <button
+          key={t}
+          type="button"
+          className={`themeBtn themeBtn${t.charAt(0).toUpperCase() + t.slice(1)} ${theme === t ? 'themeBtnActive' : ''}`}
+          onClick={() => setTheme(t)}
+          title={t === 'light' ? 'Светлая' : t === 'gray' ? 'Серая' : 'Тёмная'}
+        />
+      ))}
+    </div>
+  )
+
   if (!gameState || !session) {
+    const hasRoomFromUrl = Boolean(getRoomCodeFromUrl())
     return (
       <main className="layout">
         <section className="panel">
-          <h1>PunchMe Party</h1>
-          <p className="subtitle">Write better jokes than your friends and the AI bots.</p>
-          {errorMessage && <p className="subtitle">{errorMessage}</p>}
+          <div className="header">
+            <h1>PunchMe Party</h1>
+            {themeSwitcher}
+          </div>
+          <p className="subtitle">Придумывай шутки смешнее друзей и ботов.</p>
+          {errorMessage && <p className="subtitle errorText">{errorMessage}</p>}
           <label className="inputGroup">
-            <span>Your name</span>
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={30} />
+            <span>Твоё имя</span>
+            <input
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              maxLength={30}
+              placeholder="Введи имя..."
+            />
+          </label>
+          <label className="inputGroup">
+            <span>О себе для AI-шуток <small className="bioHint">({bio.length}/{BIO_MAX_LENGTH})</small></span>
+            <textarea
+              value={bio}
+              onChange={(event) => setBio(event.target.value.slice(0, BIO_MAX_LENGTH))}
+              maxLength={BIO_MAX_LENGTH}
+              placeholder="Чем провокативнее — тем смешнее шутки про тебя. Пример: считаю себя самым умным, место женщин на кухне, боюсь пауков"
+              rows={2}
+              className="bioTextarea"
+            />
           </label>
           <div className="row">
             <label className="inputGroup">
-              <span>Rounds</span>
+              <span>Раунды</span>
               <select value={roundCount} onChange={(event) => setRoundCount(Number(event.target.value))}>
                 <option value={3}>3</option>
                 <option value={4}>4</option>
               </select>
             </label>
             <label className="inputGroup">
-              <span>Bots</span>
+              <span>Боты</span>
               <select value={botCount} onChange={(event) => setBotCount(Number(event.target.value))}>
                 <option value={1}>1</option>
                 <option value={2}>2</option>
@@ -208,19 +330,20 @@ function App(): ReactElement {
             </label>
           </div>
           <button className="primary" onClick={handleCreateRoom}>
-            Create room
+            Создать комнату
           </button>
           <div className="divider" />
           <label className="inputGroup">
-            <span>Room code</span>
+            <span>Код комнаты</span>
             <input
               value={roomCodeToJoin}
               onChange={(event) => setRoomCodeToJoin(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
               maxLength={ROOM_CODE_LENGTH}
+              placeholder="Введи код..."
             />
           </label>
           <button className="secondary" onClick={handleJoinRoom}>
-            Join room
+            {hasRoomFromUrl ? 'Присоединиться по ссылке' : 'Присоединиться'}
           </button>
         </section>
       </main>
@@ -232,22 +355,23 @@ function App(): ReactElement {
       <section className="panel">
         <header className="header">
           <div>
-            <h1>Room {gameState.roomCode}</h1>
+            <h1>Комната {gameState.roomCode}</h1>
             <p className="subtitle">
-              Round {Math.max(gameState.roundIndex, 1)} of {gameState.roundCount}
+              Раунд {Math.max(gameState.roundIndex, 1)} из {gameState.roundCount}
             </p>
           </div>
           <div className="headerActions">
+            {themeSwitcher}
             <div className="timerHud" aria-label="Оставшееся время фазы">
               <svg className="timerRingSvg" viewBox="0 0 100 100" aria-hidden>
                 <defs>
                   <linearGradient id="timerRingGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#45c8ff" />
-                    <stop offset="100%" stopColor="#a78bfa" />
+                    <stop offset="0%" stopColor="var(--accent)" />
+                    <stop offset="100%" stopColor="var(--accent-end)" />
                   </linearGradient>
                 </defs>
                 <circle className="timerRingTrack" cx="50" cy="50" r={TIMER_RING_R} />
-                {timerFraction != null && gameState.timerSecondsLeft != null ? (
+                {timerFraction != null && displaySeconds != null ? (
                   <circle
                     className="timerRingProgress"
                     cx="50"
@@ -262,26 +386,26 @@ function App(): ReactElement {
               </svg>
               <div className="timerHudCenter">
                 <span className="timerHudLabel">Осталось</span>
-                {gameState.timerSecondsLeft != null ? (
-                  <span className="timerHudValue">{gameState.timerSecondsLeft}</span>
+                {displaySeconds != null ? (
+                  <span className="timerHudValue">{displaySeconds}</span>
                 ) : (
-                  <span className="timerHudIdle">—</span>
+                  <span className="timerHudIdle">&mdash;</span>
                 )}
                 <span className="timerHudUnit">сек</span>
               </div>
             </div>
             <button className="secondary leaveButton" onClick={executeLeaveRoom}>
-              Leave room
+              Выйти
             </button>
           </div>
         </header>
-        {errorMessage && <p className="subtitle">{errorMessage}</p>}
+        {errorMessage && <p className="subtitle errorText">{errorMessage}</p>}
 
         <ul className="scoreboard">
           {gameState.players.map((player) => (
             <li key={player.id}>
               <span>
-                {player.name} {player.isBot ? '🤖' : ''} {player.id === session.playerId ? '(you)' : ''}
+                {player.name} {player.isBot ? '🤖' : ''} {player.id === session.playerId ? '(ты)' : ''}
               </span>
               <strong>{player.score}</strong>
             </li>
@@ -290,10 +414,13 @@ function App(): ReactElement {
 
         {gameState.phase === 'lobby' && (
           <div className="phaseBlock">
-            <p>Waiting for host to start.</p>
+            <p>Ожидание игроков...</p>
+            <button className="secondary copyLinkBtn" onClick={handleCopyRoomLink}>
+              {linkCopied ? 'Ссылка скопирована!' : 'Скопировать ссылку на комнату'}
+            </button>
             {canStart && (
               <button className="primary" onClick={() => executeStartGame({ roomCode: session.roomCode })}>
-                Start game
+                Начать игру
               </button>
             )}
           </div>
@@ -301,14 +428,15 @@ function App(): ReactElement {
 
         {gameState.phase === 'writing' && (
           <div className={`phaseBlock ${hasSubmittedAnswers ? 'phaseSuccess' : ''}`}>
-            <h2>Finish both prompts</h2>
-            {hasSubmittedAnswers && <p className="confirmBanner">Answers sent — waiting for others</p>}
+            <h2>Закончи оба предложения</h2>
+            {hasSubmittedAnswers && <p className="confirmBanner">Ответы отправлены — ждём остальных</p>}
             <label className="inputGroup">
               <span>{myPromptLabels[0]}</span>
               <textarea
                 value={answers[0]}
                 disabled={hasSubmittedAnswers}
                 onChange={(event) => setAnswers([event.target.value, answers[1]])}
+                placeholder="Напиши продолжение..."
               />
             </label>
             <label className="inputGroup">
@@ -317,6 +445,7 @@ function App(): ReactElement {
                 value={answers[1]}
                 disabled={hasSubmittedAnswers}
                 onChange={(event) => setAnswers([answers[0], event.target.value])}
+                placeholder="Напиши продолжение..."
               />
             </label>
             <button
@@ -325,7 +454,7 @@ function App(): ReactElement {
               disabled={!canSubmit}
               onClick={handleSubmit}
             >
-              {hasSubmittedAnswers ? 'Sent' : 'Submit answers'}
+              {hasSubmittedAnswers ? 'Отправлено' : 'Отправить ответы'}
             </button>
           </div>
         )}
@@ -392,16 +521,16 @@ function App(): ReactElement {
 
         {gameState.phase === 'scoreboard' && (
           <div className="phaseBlock">
-            <h2>Round complete</h2>
-            <p>Scores updated. Next round starts automatically.</p>
+            <h2>Раунд завершён</h2>
+            <p>Очки обновлены. Следующий раунд начнётся автоматически.</p>
           </div>
         )}
 
         {gameState.phase === 'rating' && (
           <div className={`phaseBlock ${hasSubmittedRatings ? 'phaseSuccess' : ''}`}>
-            <h2>Rate the jokes</h2>
-            <p className="subtitle ratingHint">Scoring is optional — submit to skip or send a partial ballot.</p>
-            {hasSubmittedRatings && <p className="confirmBanner">Ratings sent</p>}
+            <h2>Оцени шутки</h2>
+            <p className="subtitle ratingHint">Оценка необязательна — можно отправить пустую.</p>
+            {hasSubmittedRatings && <p className="confirmBanner">Оценки отправлены</p>}
             {gameState.ratingItems.map((item) => (
               <div
                 key={item.id}
@@ -411,7 +540,7 @@ function App(): ReactElement {
                 <strong>{item.punchline}</strong>
                 <small>{getPlayerNameById(gameState.players, item.authorPlayerId)}</small>
                 {isOwnJoke(item, session.playerId) ? (
-                  <span className="ratingSelf">Your joke</span>
+                  <span className="ratingSelf">Твоя шутка</span>
                 ) : (
                   <select
                     value={ratings[item.id] ?? ''}
@@ -434,15 +563,15 @@ function App(): ReactElement {
               disabled={hasSubmittedRatings}
               onClick={handleSubmitRatings}
             >
-              {hasSubmittedRatings ? 'Sent' : 'Submit ratings'}
+              {hasSubmittedRatings ? 'Отправлено' : 'Отправить оценки'}
             </button>
           </div>
         )}
 
         {gameState.phase === 'finished' && (
           <div className="phaseBlock">
-            <h2>Game finished</h2>
-            <p>Winner: {gameState.players[0]?.name ?? 'No winner'}</p>
+            <h2>Игра окончена!</h2>
+            <p>Победитель: {gameState.players[0]?.name ?? 'Нет победителя'}</p>
           </div>
         )}
       </section>

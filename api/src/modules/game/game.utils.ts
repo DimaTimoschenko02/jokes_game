@@ -19,14 +19,30 @@ export const normalizeName = (name: string): string =>
 export const normalizeAnswer = (value: string): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, ANSWER_MAX_LENGTH)
 
-export const createPlayer = (input: { readonly name: string; readonly socketId: string | null; readonly isBot: boolean }): Player => ({
+export const createPlayer = (input: { readonly name: string; readonly socketId: string | null; readonly isBot: boolean; readonly bio?: string }): Player => ({
   id: createId(),
   socketId: input.socketId,
   isBot: input.isBot,
   name: normalizeName(input.name),
+  bio: input.bio?.slice(0, 200) ?? '',
   connected: true,
   score: 0
 })
+
+export const buildPlayerContext = (players: Map<string, Player>): string => {
+  const lines: string[] = []
+  players.forEach((player) => {
+    if (player.isBot) {
+      return
+    }
+    if (player.bio) {
+      lines.push(`${player.name}: ${player.bio}`)
+    } else {
+      lines.push(player.name)
+    }
+  })
+  return lines.join('\n')
+}
 
 export const createSubmission = (playerId: string, assignedPromptIndices: readonly [number, number]): Submission => ({
   playerId,

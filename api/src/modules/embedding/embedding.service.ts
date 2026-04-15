@@ -3,7 +3,7 @@ import { EmbeddingResult } from './models/embedding-result.type'
 import { OllamaEmbeddingResponse } from './models/ollama-embedding-response.type'
 
 const OLLAMA_BASE_URL: string = process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434'
-const OLLAMA_EMBED_MODEL: string = process.env.OLLAMA_EMBED_MODEL ?? 'nomic-embed-text'
+const OLLAMA_EMBED_MODEL: string = process.env.OLLAMA_EMBED_MODEL ?? 'bge-m3'
 const EMBED_TIMEOUT_MS: number = 15000
 
 @Injectable()

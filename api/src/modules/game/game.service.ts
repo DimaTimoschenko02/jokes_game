@@ -21,6 +21,7 @@ import { PlayerSession } from './models/player-session.type'
 import { SocketPlayerLink } from './models/socket-player-link.type'
 import {
   buildCircularPromptAssignments,
+  buildPlayerContext,
   createDuelsForPrompts,
   createPlayer,
   createRatingItems,
@@ -59,8 +60,9 @@ export class GameService {
     readonly name: string
     readonly roundCount: number
     readonly botCount: number
+    readonly bio?: string
   }): Promise<PlayerSession> {
-    const host = createPlayer({ name: input.name, socketId: input.socketId, isBot: false })
+    const host = createPlayer({ name: input.name, socketId: input.socketId, isBot: false, bio: input.bio })
     const roomCode = createRoomCode()
     const room: GameRoom = {
       code: roomCode,
@@ -71,6 +73,7 @@ export class GameService {
       phase: 'lobby',
       roundIndex: 0,
       prompts: [],
+      allOpenings: [],
       usedPromptTexts: [],
       promptAssignments: new Map(),
       submissions: new Map(),
@@ -89,10 +92,10 @@ export class GameService {
     return { roomCode, playerId: host.id }
   }
 
-  public joinRoom(input: { readonly socketId: string; readonly roomCode: string; readonly name: string }): PlayerSession {
+  public joinRoom(input: { readonly socketId: string; readonly roomCode: string; readonly name: string; readonly bio?: string }): PlayerSession {
     const room = this.getRoomOrFail(input.roomCode)
     this.ensureLobbyPhase(room)
-    const player = createPlayer({ name: input.name, socketId: input.socketId, isBot: false })
+    const player = createPlayer({ name: input.name, socketId: input.socketId, isBot: false, bio: input.bio })
     room.players.set(player.id, player)
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })
     this.emitRoomState(room.code)
@@ -135,7 +138,45 @@ export class GameService {
     this.ensureEvenPlayerCount(room)
     this.resetPlayerScores(room)
     room.roundIndex = 0
+    room.allOpenings = []
+    await this.generateAllOpeningsForGame(room)
     await this.startWritingPhase(room.code)
+  }
+
+  private async generateAllOpeningsForGame(room: GameRoom): Promise<void> {
+    const playerCount = room.players.size
+    const needed = playerCount * room.roundCount
+    const playerNames = this.getHumanPlayerNames(room)
+    const playerContext = buildPlayerContext(room.players)
+    const goldenExamples = await this.promptStarterService.getGoldenExamples(10)
+
+    this.logger.log(`generate_all_openings room=${room.code} needed=${needed} players=${playerCount} rounds=${room.roundCount}`)
+
+    const openings = await this.aiService.generateAllOpenings({
+      needed,
+      playerNames,
+      playerContext,
+      goldenExamples
+    })
+
+    if (openings.length >= needed) {
+      room.allOpenings = [...openings]
+      this.logger.log(`generate_all_openings_ok room=${room.code} count=${openings.length}`)
+      return
+    }
+
+    this.logger.warn(`generate_all_openings_insufficient room=${room.code} got=${openings.length} needed=${needed} falling_back`)
+    const fallbackPrompts = await this.promptStarterService.selectPrompts({
+      count: needed - openings.length,
+      excludedTexts: openings as string[]
+    })
+    room.allOpenings = [...openings, ...fallbackPrompts]
+  }
+
+  private getHumanPlayerNames(room: GameRoom): readonly string[] {
+    return Array.from(room.players.values())
+      .filter((player) => !player.isBot)
+      .map((player) => player.name)
   }
 
   public submitAnswers(input: { readonly roomCode: string; readonly playerId: string; readonly answers: [string, string] }): void {
@@ -294,12 +335,18 @@ export class GameService {
     room.submissions = new Map()
     const playerIds = Array.from(room.players.keys())
     const playerCount = playerIds.length
-    const prompts = await this.promptStarterService.selectPrompts({
-      count: playerCount,
-      excludedTexts: room.usedPromptTexts
-    })
-    room.prompts = prompts
-    room.usedPromptTexts.push(...prompts)
+    const roundOffset = (room.roundIndex - 1) * playerCount
+    const roundOpenings = room.allOpenings.slice(roundOffset, roundOffset + playerCount)
+    if (roundOpenings.length < playerCount) {
+      this.logger.warn(`writing_phase_insufficient_openings room=${room.code} round=${room.roundIndex} got=${roundOpenings.length} needed=${playerCount}`)
+      const fallback = await this.promptStarterService.selectPrompts({
+        count: playerCount - roundOpenings.length,
+        excludedTexts: room.usedPromptTexts
+      })
+      roundOpenings.push(...fallback)
+    }
+    room.prompts = roundOpenings
+    room.usedPromptTexts.push(...roundOpenings)
     room.promptAssignments = buildCircularPromptAssignments(playerIds)
     room.players.forEach((player) => {
       const assignment = room.promptAssignments.get(player.id)
@@ -310,7 +357,6 @@ export class GameService {
     })
     this.emitRoomState(room.code)
     this.generateBotAnswers(room)
-    this.promptStarterService.generateAndStoreInBackground()
     this.setRoomTimer(room, WRITING_PHASE_SECONDS, () => this.startVotingPhase(room.code))
   }
 
@@ -319,8 +365,25 @@ export class GameService {
       if (!player.isBot) {
         return
       }
-      this.upsertSubmission(room, player.id, [LOCAL_FALLBACK_ANSWER, LOCAL_FALLBACK_ANSWER])
       void this.createBotSubmission(room.code, player.id)
+    })
+  }
+
+  private fillMissingBotAnswers(room: GameRoom): void {
+    room.players.forEach((player) => {
+      if (!player.isBot) {
+        return
+      }
+      const submission = room.submissions.get(player.id)
+      if (!submission) {
+        return
+      }
+      if (!submission.answers[0]) {
+        submission.answers[0] = LOCAL_FALLBACK_ANSWER
+      }
+      if (!submission.answers[1]) {
+        submission.answers[1] = LOCAL_FALLBACK_ANSWER
+      }
     })
   }
 
@@ -329,7 +392,7 @@ export class GameService {
     if (!room || room.phase !== 'writing') {
       return
     }
-    const delayMs = 1500 + Math.floor(Math.random() * 3500)
+    const delayMs = 500 + Math.floor(Math.random() * 1500)
     await new Promise<void>((resolve) => {
       setTimeout(() => resolve(), delayMs)
     })
@@ -339,9 +402,11 @@ export class GameService {
     }
     const promptOne = room.prompts[submission.assignedPromptIndices[0]]
     const promptTwo = room.prompts[submission.assignedPromptIndices[1]]
+    const playerNames = this.getHumanPlayerNames(room)
+    const playerContext = buildPlayerContext(room.players)
     const answers: [string, string] = [
-      await this.generateSafeBotAnswer(promptOne),
-      await this.generateSafeBotAnswer(promptTwo)
+      await this.generateSafeBotAnswer(promptOne, playerNames, playerContext),
+      await this.generateSafeBotAnswer(promptTwo, playerNames, playerContext)
     ]
     if (room.phase !== 'writing') {
       return
@@ -357,12 +422,16 @@ export class GameService {
     return BOT_STYLES[Math.floor(Math.random() * BOT_STYLES.length)]
   }
 
-  private async generateSafeBotAnswer(prompt: string): Promise<string> {
+  private getRandomDarkness(): number {
+    return Math.floor(Math.random() * 10) + 1
+  }
+
+  private async generateSafeBotAnswer(prompt: string, playerNames: readonly string[], playerContext: string): Promise<string> {
     const timeoutPromise = new Promise<string>((resolve) => {
-      setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 90000)
+      setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 60_000)
     })
     const aiPromise = this.aiService
-      .generateBotAnswer({ prompt, styleTag: this.getBotStyle() })
+      .generateBotAnswer({ prompt, styleTag: this.getBotStyle(), darknessLevel: this.getRandomDarkness(), playerNames, playerContext })
       .then((value) => normalizeAnswer(value))
     return Promise.race([aiPromise, timeoutPromise]).catch(() => LOCAL_FALLBACK_ANSWER)
   }
@@ -388,6 +457,7 @@ export class GameService {
     if (!room || room.phase !== 'writing') {
       return
     }
+    this.fillMissingBotAnswers(room)
     room.phase = 'voting'
     room.duels = createDuelsForPrompts(room)
     room.duelIndex = 0
@@ -522,6 +592,7 @@ export class GameService {
       room.phase = 'finished'
       this.clearRoomTimer(room)
       this.emitRoomState(room.code)
+      this.evaluateAndSaveGoldenOpenings(room)
       return
     }
     void this.startWritingPhase(room.code)
@@ -776,6 +847,7 @@ export class GameService {
     const votesAgainst = votes?.votesAgainst ?? 0
     const ratingAverage = ratingStats?.average
     const ratingCount = ratingStats?.count
+    const source: 'human' | 'bot' = player.isBot ? 'bot' : 'human'
     this.jokeMemoryService.executeEnqueueRecordJoke({
       prompt: item.prompt,
       punchline: item.punchline,
@@ -783,9 +855,82 @@ export class GameService {
       votesAgainst,
       ratingAverage,
       ratingCount,
-      source: player.isBot ? 'bot' : 'human',
+      source,
       roomCode: room.code,
       roundIndex: room.roundIndex
     })
+    this.promptStarterService.pushCompletion({
+      promptText: item.prompt,
+      punchline: item.punchline,
+      source,
+      votesFor,
+      votesAgainst,
+      ratingAverage,
+      ratingCount,
+      roomCode: room.code,
+      roundIndex: room.roundIndex
+    })
+  }
+
+  private evaluateAndSaveGoldenOpenings(room: GameRoom): void {
+    void this.executeGoldenEvaluation(room).catch((error: unknown) => {
+      this.logger.warn(`golden_evaluation_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`)
+    })
+  }
+
+  private async executeGoldenEvaluation(room: GameRoom): Promise<void> {
+    const openingMetrics = new Map<string, { ratings: number[]; voteShares: number[] }>()
+
+    for (const items of [room.ratingItems]) {
+      for (const item of items) {
+        if (!item.prompt || !item.punchline) {
+          continue
+        }
+        const existing = openingMetrics.get(item.prompt) ?? { ratings: [], voteShares: [] }
+        const votes = room.roundVotes.get(item.id)
+        if (votes) {
+          const total = votes.votesFor + votes.votesAgainst
+          if (total > 0) {
+            existing.voteShares.push(votes.votesFor / total)
+          }
+        }
+        openingMetrics.set(item.prompt, existing)
+      }
+    }
+
+    // Collect ratings from all rounds — ratingItems only has current round
+    // Use usedPromptTexts as the source of all openings
+    // Rating data is persisted per-round via persistRoundRatings, so we use prompt_starters completions
+
+    let goldenCount = 0
+    for (const [prompt, metrics] of openingMetrics) {
+      const avgVoteShare = metrics.voteShares.length > 0
+        ? metrics.voteShares.reduce((a, b) => a + b, 0) / metrics.voteShares.length
+        : 0
+
+      // Use completions from prompt_starters for ratings (already persisted)
+      const completions = await this.promptStarterService.getCompletionsForPrompt(prompt)
+      const ratingsFromCompletions = completions
+        .filter((c) => c.ratingAverage !== undefined && c.ratingAverage !== null)
+        .map((c) => c.ratingAverage!)
+      const avgRating = ratingsFromCompletions.length > 0
+        ? ratingsFromCompletions.reduce((a, b) => a + b, 0) / ratingsFromCompletions.length
+        : 0
+      const hasHighRating = ratingsFromCompletions.some((r) => r >= 8)
+      const completionCount = completions.length
+
+      const isGolden = completionCount >= 2 && hasHighRating && (avgRating >= 7.0 || avgVoteShare >= 0.65)
+
+      if (isGolden) {
+        await this.promptStarterService.saveGoldenOpening({
+          text: prompt,
+          averageCompletionRating: avgRating,
+          averageVoteShare: avgVoteShare
+        })
+        goldenCount += 1
+      }
+    }
+
+    this.logger.log(`golden_evaluation room=${room.code} evaluated=${openingMetrics.size} golden=${goldenCount}`)
   }
 }

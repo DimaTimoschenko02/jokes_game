@@ -13,6 +13,7 @@ export type GameRoom = {
   phase: GamePhase
   roundIndex: number
   prompts: readonly string[]
+  allOpenings: string[]
   usedPromptTexts: string[]
   promptAssignments: Map<string, readonly [number, number]>
   submissions: Map<string, Submission>

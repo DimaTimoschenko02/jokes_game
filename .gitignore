@@ -47,3 +47,11 @@ Desktop.ini
 
 # Misc
 *.pem
+
+# Tool configs (local)
+.claude/
+.mcp.json
+.swarm/
+ruvector.db
+.cursor/plans/
+.cursor/skills/

@@ -1,4 +1,14 @@
 services:
+  # ── Infrastructure (always needed) ──────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: punchme-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - punchme-mongo-data:/data/db
+
   ollama:
     image: ollama/ollama:latest
     container_name: punchme-ollama
@@ -14,44 +24,6 @@ services:
       retries: 12
       start_period: 90s
 
-  api:
-    build:
-      context: ./api
-    container_name: punchme-api
-    environment:
-      PORT: 4000
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      OLLAMA_MODEL: huihui_ai/qwen2.5-abliterate:3b
-      OLLAMA_EMBED_MODEL: nomic-embed-text
-      MONGO_URI: mongodb://mongo:27017/punchme
-    ports:
-      - '4000:4000'
-    depends_on:
-      mongo:
-        condition: service_started
-      ollama:
-        condition: service_healthy
-
-  web:
-    build:
-      context: ./web
-    container_name: punchme-web
-    environment:
-      VITE_SOCKET_PROXY_TARGET: http://api:4000
-    ports:
-      - '5173:5173'
-    depends_on:
-      - api
-
-  mongo:
-    image: mongo:7
-    container_name: punchme-mongo
-    restart: unless-stopped
-    ports:
-      - '27017:27017'
-    volumes:
-      - punchme-mongo-data:/data/db
-
   model-pull:
     image: curlimages/curl:8.10.1
     container_name: punchme-model-pull
@@ -64,12 +36,42 @@ services:
       - >
         curl -sS -X POST http://ollama:11434/api/pull
         -H "Content-Type: application/json"
-        -d '{"model":"huihui_ai/qwen2.5-abliterate:3b"}'
-        && curl -sS -X POST http://ollama:11434/api/pull
-        -H "Content-Type: application/json"
-        -d '{"model":"nomic-embed-text"}'
+        -d '{"model":"bge-m3"}'
     profiles:
       - setup
+
+  # ── App containers (production/Docker mode) ─────────────────────
+  api:
+    build:
+      context: ./api
+    container_name: punchme-api
+    environment:
+      PORT: 4000
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_EMBED_MODEL: bge-m3
+      MONGO_URI: mongodb://mongo:27017/punchme
+    ports:
+      - '4000:4000'
+    depends_on:
+      mongo:
+        condition: service_started
+      ollama:
+        condition: service_healthy
+    profiles:
+      - production
+
+  web:
+    build:
+      context: ./web
+    container_name: punchme-web
+    environment:
+      VITE_SOCKET_PROXY_TARGET: http://api:4000
+    ports:
+      - '5173:5173'
+    depends_on:
+      - api
+    profiles:
+      - production
 
   ngrok:
     image: ngrok/ngrok:latest
