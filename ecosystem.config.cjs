@@ -13,6 +13,7 @@ module.exports = {
         MONGO_URI: 'mongodb://127.0.0.1:27017/punchme',
         OLLAMA_BASE_URL: 'http://127.0.0.1:11434',
         OLLAMA_EMBED_MODEL: 'bge-m3',
+        PATH: '/home/qwe/.nvm/versions/node/v22.22.2/bin:/usr/local/bin:/usr/bin:/bin',
       },
     },
   ],
