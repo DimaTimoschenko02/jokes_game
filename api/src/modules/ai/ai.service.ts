@@ -54,29 +54,34 @@ export class AiService {
     readonly playerNames: readonly string[]
     readonly playerContext: string
     readonly goldenExamples: readonly string[]
+    readonly excludedOpenings?: readonly string[]
   }): Promise<readonly string[]> {
     const candidateCount = input.needed * CANDIDATE_MULTIPLIER
-    this.logger.log(`generate_all_openings needed=${input.needed} candidates=${candidateCount}`)
+    const excluded = input.excludedOpenings ?? []
+    this.logger.log(`generate_all_openings needed=${input.needed} candidates=${candidateCount} excluded=${excluded.length}`)
 
     const candidates = await this.generateOpeningCandidates(
       candidateCount,
       input.playerNames,
       input.playerContext,
-      input.goldenExamples
+      input.goldenExamples,
+      excluded
     )
 
-    if (candidates.length === 0) {
+    const deduped = this.dedupeAgainstExisting(candidates, excluded)
+
+    if (deduped.length === 0) {
       this.logger.warn('generate_all_openings_no_candidates')
       return []
     }
 
-    if (candidates.length <= input.needed) {
-      this.logger.log(`generate_all_openings_skip_filter candidates=${candidates.length} needed=${input.needed}`)
-      return candidates
+    if (deduped.length <= input.needed) {
+      this.logger.log(`generate_all_openings_skip_filter candidates=${deduped.length} needed=${input.needed}`)
+      return deduped
     }
 
     const filtered = await this.filterOpenings(
-      candidates,
+      deduped,
       input.needed,
       input.goldenExamples,
       input.playerContext
@@ -88,18 +93,41 @@ export class AiService {
     }
 
     this.logger.warn(`generate_all_openings_partial filtered=${filtered.length} needed=${input.needed} using_candidates_as_fallback`)
-    return candidates.slice(0, input.needed)
+    return deduped.slice(0, input.needed)
+  }
+
+  private dedupeAgainstExisting(candidates: readonly string[], excluded: readonly string[]): readonly string[] {
+    if (excluded.length === 0) {
+      return candidates
+    }
+    const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s.,!?:;«»"'—–-]+/g, ' ').trim()
+    const excludedNorm = new Set(excluded.map(normalize))
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const candidate of candidates) {
+      const norm = normalize(candidate)
+      if (excludedNorm.has(norm) || seen.has(norm)) {
+        continue
+      }
+      seen.add(norm)
+      result.push(candidate)
+    }
+    if (result.length < candidates.length) {
+      this.logger.log(`dedupe_openings input=${candidates.length} kept=${result.length} dropped=${candidates.length - result.length}`)
+    }
+    return result
   }
 
   private async generateOpeningCandidates(
     count: number,
     playerNames: readonly string[],
     playerContext: string,
-    goldenExamples: readonly string[]
+    goldenExamples: readonly string[],
+    excludedOpenings: readonly string[] = []
   ): Promise<readonly string[]> {
     const content = await this.executeClaudeRequest(
       OPENING_GENERATION_SYSTEM_PROMPT,
-      createOpeningGenerationUserPrompt(count, playerNames, playerContext, goldenExamples),
+      createOpeningGenerationUserPrompt(count, playerNames, playerContext, goldenExamples, excludedOpenings),
       { effort: 'medium' }
     )
     const result = this.parseStringArray(content)

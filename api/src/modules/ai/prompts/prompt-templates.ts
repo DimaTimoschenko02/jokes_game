@@ -55,7 +55,8 @@ export const createOpeningGenerationUserPrompt = (
   count: number,
   playerNames: readonly string[],
   playerContext: string,
-  goldenExamples: readonly string[]
+  goldenExamples: readonly string[],
+  excludedOpenings: readonly string[] = []
 ): string => {
   const darknessLevels = Array.from({ length: count }, () => Math.floor(Math.random() * 10) + 1)
   const lines = [
@@ -80,6 +81,12 @@ export const createOpeningGenerationUserPrompt = (
     lines.push(
       '\nThese openings led to the FUNNIEST games before — use them as your quality bar:',
       ...goldenExamples.map((example, index) => `${index + 1}. "${example}"`)
+    )
+  }
+  if (excludedOpenings.length > 0) {
+    lines.push(
+      '\nALREADY USED in this game — DO NOT repeat these or anything semantically similar (different topic, different setup, different scene):',
+      ...excludedOpenings.map((example, index) => `${index + 1}. "${example}"`)
     )
   }
   return lines.join('\n')

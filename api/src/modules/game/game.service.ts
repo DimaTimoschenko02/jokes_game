@@ -84,7 +84,8 @@ export class GameService {
       roundVotes: new Map(),
       timerEndsAt: null,
       isStarting: false,
-      timerHandle: null
+      timerHandle: null,
+      prefetchOpeningsPromise: null
     }
     this.createBots(room)
     this.rooms.set(roomCode, room)
@@ -146,41 +147,75 @@ export class GameService {
       this.resetPlayerScores(room)
       room.roundIndex = 0
       room.allOpenings = []
-      await this.generateAllOpeningsForGame(room)
+      room.prefetchOpeningsPromise = null
+      await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
     } finally {
       room.isStarting = false
     }
   }
 
-  private async generateAllOpeningsForGame(room: GameRoom): Promise<void> {
+  private async generateOpeningsForRound(room: GameRoom, roundNumber: number): Promise<void> {
     const playerCount = room.players.size
-    const needed = playerCount * room.roundCount
+    const needed = playerCount
+    const offset = (roundNumber - 1) * playerCount
+    if (room.allOpenings.length >= offset + needed) {
+      return
+    }
     const playerNames = this.getHumanPlayerNames(room)
     const playerContext = buildPlayerContext(room.players)
     const goldenExamples = await this.promptStarterService.getGoldenExamples(10)
 
-    this.logger.log(`generate_all_openings room=${room.code} needed=${needed} players=${playerCount} rounds=${room.roundCount}`)
+    this.logger.log(`generate_round_openings room=${room.code} round=${roundNumber} needed=${needed} already=${room.allOpenings.length}`)
 
     const openings = await this.aiService.generateAllOpenings({
       needed,
       playerNames,
       playerContext,
-      goldenExamples
+      goldenExamples,
+      excludedOpenings: room.allOpenings
     })
 
     if (openings.length >= needed) {
-      room.allOpenings = [...openings]
-      this.logger.log(`generate_all_openings_ok room=${room.code} count=${openings.length}`)
+      room.allOpenings.push(...openings)
+      this.logger.log(`generate_round_openings_ok room=${room.code} round=${roundNumber} count=${openings.length}`)
       return
     }
 
-    this.logger.warn(`generate_all_openings_insufficient room=${room.code} got=${openings.length} needed=${needed} falling_back`)
+    this.logger.warn(`generate_round_openings_insufficient room=${room.code} round=${roundNumber} got=${openings.length} needed=${needed} falling_back`)
     const fallbackPrompts = await this.promptStarterService.selectPrompts({
       count: needed - openings.length,
-      excludedTexts: openings as string[]
+      excludedTexts: [...room.allOpenings, ...openings]
     })
-    room.allOpenings = [...openings, ...fallbackPrompts]
+    room.allOpenings.push(...openings, ...fallbackPrompts)
+  }
+
+  private prefetchNextRoundOpenings(room: GameRoom): void {
+    const nextRound = room.roundIndex + 1
+    if (nextRound > room.roundCount) {
+      return
+    }
+    if (room.prefetchOpeningsPromise) {
+      return
+    }
+    const playerCount = room.players.size
+    const offset = (nextRound - 1) * playerCount
+    if (room.allOpenings.length >= offset + playerCount) {
+      return
+    }
+    this.logger.log(`prefetch_round_openings_start room=${room.code} round=${nextRound}`)
+    room.prefetchOpeningsPromise = this.generateOpeningsForRound(room, nextRound)
+      .then(() => {
+        this.logger.log(`prefetch_round_openings_done room=${room.code} round=${nextRound}`)
+        return room.allOpenings.slice(offset, offset + playerCount)
+      })
+      .catch((err) => {
+        this.logger.warn(`prefetch_round_openings_failed room=${room.code} round=${nextRound} error=${(err as Error).message}`)
+        return []
+      })
+      .finally(() => {
+        room.prefetchOpeningsPromise = null
+      }) as Promise<readonly string[]>
   }
 
   private getHumanPlayerNames(room: GameRoom): readonly string[] {
@@ -335,7 +370,19 @@ export class GameService {
 
   private async startWritingPhase(roomCode: string): Promise<void> {
     const room = this.getRoomOrFail(roomCode)
-    room.roundIndex += 1
+    const nextRound = room.roundIndex + 1
+    const playerCount = room.players.size
+    const expectedOffset = (nextRound - 1) * playerCount
+    if (room.allOpenings.length < expectedOffset + playerCount) {
+      if (room.prefetchOpeningsPromise) {
+        this.logger.log(`writing_phase_awaiting_prefetch room=${room.code} round=${nextRound}`)
+        await room.prefetchOpeningsPromise.catch(() => undefined)
+      }
+      if (room.allOpenings.length < expectedOffset + playerCount) {
+        await this.generateOpeningsForRound(room, nextRound)
+      }
+    }
+    room.roundIndex = nextRound
     room.phase = 'writing'
     room.duels = []
     room.duelIndex = 0
@@ -344,8 +391,7 @@ export class GameService {
     room.roundVotes = new Map()
     room.submissions = new Map()
     const playerIds = Array.from(room.players.keys())
-    const playerCount = playerIds.length
-    const roundOffset = (room.roundIndex - 1) * playerCount
+    const roundOffset = expectedOffset
     const roundOpenings = room.allOpenings.slice(roundOffset, roundOffset + playerCount)
     if (roundOpenings.length < playerCount) {
       this.logger.warn(`writing_phase_insufficient_openings room=${room.code} round=${room.roundIndex} got=${roundOpenings.length} needed=${playerCount}`)
@@ -367,6 +413,7 @@ export class GameService {
     })
     this.emitRoomState(room.code)
     this.generateBotAnswers(room)
+    this.prefetchNextRoundOpenings(room)
     this.setRoomTimer(room, WRITING_PHASE_SECONDS, () => this.startVotingPhase(room.code))
   }
 

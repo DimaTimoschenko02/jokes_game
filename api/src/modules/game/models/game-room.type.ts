@@ -25,4 +25,5 @@ export type GameRoom = {
   timerEndsAt: number | null
   timerHandle: NodeJS.Timeout | null
   isStarting: boolean
+  prefetchOpeningsPromise: Promise<readonly string[]> | null
 }
