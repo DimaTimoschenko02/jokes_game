@@ -15,7 +15,7 @@ import { spawn } from 'node:child_process'
 
 const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL ?? 'sonnet'
 const CLAUDE_EFFORT: string = process.env.CLAUDE_EFFORT ?? 'high'
-const CLAUDE_TIMEOUT_MS: number = 60_000
+const CLAUDE_TIMEOUT_MS: number = 180_000
 const MEMORY_EXAMPLES_LIMIT: number = 8
 const METRICS_LOG_INTERVAL: number = 20
 const CANDIDATE_MULTIPLIER: number = 3
