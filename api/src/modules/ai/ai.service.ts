@@ -99,7 +99,8 @@ export class AiService {
   ): Promise<readonly string[]> {
     const content = await this.executeClaudeRequest(
       OPENING_GENERATION_SYSTEM_PROMPT,
-      createOpeningGenerationUserPrompt(count, playerNames, playerContext, goldenExamples)
+      createOpeningGenerationUserPrompt(count, playerNames, playerContext, goldenExamples),
+      { effort: 'medium' }
     )
     const result = this.parseStringArray(content)
     this.logger.log(`\n=== CANDIDATES (${result.length}) ===\n${result.map((o, i) => `  ${i + 1}. ${o}`).join('\n')}`)
@@ -115,7 +116,8 @@ export class AiService {
     this.logger.log(`filter_openings candidates=${candidates.length} needed=${needed}`)
     const content = await this.executeClaudeRequest(
       OPENING_FILTER_SYSTEM_PROMPT,
-      createOpeningFilterUserPrompt(candidates, needed, goldenExamples, playerContext)
+      createOpeningFilterUserPrompt(candidates, needed, goldenExamples, playerContext),
+      { effort: 'medium' }
     )
     const result = this.parseStringArray(content)
     this.logger.log(`\n=== SELECTED FOR ROUNDS (${result.length}) ===\n${result.map((o, i) => `  ${i + 1}. ${o}`).join('\n')}`)
@@ -177,16 +179,21 @@ export class AiService {
 
   // ── Claude CLI ──────────────────────────────────────────────────
 
-  private executeClaudeRequest(systemPrompt: string, userMessage: string): Promise<string> {
+  private executeClaudeRequest(
+    systemPrompt: string,
+    userMessage: string,
+    options: { readonly effort?: string } = {}
+  ): Promise<string> {
+    const effort = options.effort ?? CLAUDE_EFFORT
     const requestId = Math.random().toString(36).slice(2, 8)
-    this.logger.log(`claude_request id=${requestId} model=${CLAUDE_MODEL} effort=${CLAUDE_EFFORT}`)
+    this.logger.log(`claude_request id=${requestId} model=${CLAUDE_MODEL} effort=${effort}`)
     this.logger.debug(`claude_prompt id=${requestId} system="${systemPrompt.slice(0, 120)}" user="${userMessage.slice(0, 200)}"`)
 
     return new Promise<string>((resolve) => {
       const args: string[] = [
         '-p',
         '--model', CLAUDE_MODEL,
-        '--effort', CLAUDE_EFFORT,
+        '--effort', effort,
         '--system-prompt', systemPrompt,
         '--output-format', 'json'
       ]
