@@ -194,8 +194,7 @@ export class AiService {
       const startMs = Date.now()
       const proc = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: CLAUDE_TIMEOUT_MS,
-        shell: true
+        timeout: CLAUDE_TIMEOUT_MS
       })
 
       proc.stdin.write(userMessage)

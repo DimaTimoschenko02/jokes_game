@@ -137,9 +137,13 @@ const createRatingItem = (
   if (!punchline) {
     return null
   }
+  const prompt = room.prompts[promptIndex]
+  if (!prompt) {
+    return null
+  }
   return {
     id: `${playerId}:${promptIndex}`,
-    prompt: room.prompts[promptIndex],
+    prompt,
     punchline,
     authorPlayerId: playerId,
     promptIndex

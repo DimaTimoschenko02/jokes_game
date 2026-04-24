@@ -24,4 +24,5 @@ export type GameRoom = {
   roundVotes: Map<string, { readonly votesFor: number; readonly votesAgainst: number }>
   timerEndsAt: number | null
   timerHandle: NodeJS.Timeout | null
+  isStarting: boolean
 }

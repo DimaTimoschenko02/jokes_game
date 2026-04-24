@@ -83,6 +83,7 @@ export class GameService {
       ratingSubmissions: new Map(),
       roundVotes: new Map(),
       timerEndsAt: null,
+      isStarting: false,
       timerHandle: null
     }
     this.createBots(room)
@@ -136,11 +137,20 @@ export class GameService {
     this.ensureHost(room, input.playerId)
     this.ensureLobbyPhase(room)
     this.ensureEvenPlayerCount(room)
-    this.resetPlayerScores(room)
-    room.roundIndex = 0
-    room.allOpenings = []
-    await this.generateAllOpeningsForGame(room)
-    await this.startWritingPhase(room.code)
+    if (room.isStarting) {
+      this.logger.warn(`start_game_already_in_progress room=${room.code}`)
+      return
+    }
+    room.isStarting = true
+    try {
+      this.resetPlayerScores(room)
+      room.roundIndex = 0
+      room.allOpenings = []
+      await this.generateAllOpeningsForGame(room)
+      await this.startWritingPhase(room.code)
+    } finally {
+      room.isStarting = false
+    }
   }
 
   private async generateAllOpeningsForGame(room: GameRoom): Promise<void> {
@@ -840,7 +850,7 @@ export class GameService {
     ratingStats: { readonly average: number; readonly count: number } | undefined
   ): void {
     const player = room.players.get(item.authorPlayerId)
-    if (!player || !item.punchline) {
+    if (!player || !item.punchline || !item.prompt) {
       return
     }
     const votesFor = votes?.votesFor ?? 0
