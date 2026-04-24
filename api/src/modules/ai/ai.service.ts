@@ -18,7 +18,7 @@ const CLAUDE_EFFORT: string = process.env.CLAUDE_EFFORT ?? 'high'
 const CLAUDE_TIMEOUT_MS: number = 180_000
 const MEMORY_EXAMPLES_LIMIT: number = 8
 const METRICS_LOG_INTERVAL: number = 20
-const CANDIDATE_MULTIPLIER: number = 3
+const CANDIDATE_MULTIPLIER: number = 2
 
 interface ClaudeJsonResponse {
   result?: string
