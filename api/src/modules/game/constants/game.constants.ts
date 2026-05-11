@@ -1,5 +1,5 @@
 export const ROUND_COUNT_DEFAULT: number = 4
-export const ROUND_COUNT_MIN: number = 3
+export const ROUND_COUNT_MIN: number = 2
 export const ROUND_COUNT_MAX: number = 4
 export const BOT_COUNT_MIN: number = 1
 export const BOT_COUNT_MAX: number = 2

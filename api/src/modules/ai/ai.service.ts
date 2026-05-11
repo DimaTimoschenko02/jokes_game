@@ -11,7 +11,7 @@ import {
   createOpeningFilterUserPrompt,
   createOpeningGenerationUserPrompt
 } from './prompts/prompt-templates'
-import { spawn } from 'node:child_process'
+import spawn from 'cross-spawn'
 
 const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL ?? 'sonnet'
 const CLAUDE_EFFORT: string = process.env.CLAUDE_EFFORT ?? 'high'
@@ -28,13 +28,15 @@ interface ClaudeJsonResponse {
 
 const botAnswerSchema = z.string().min(1).max(140)
 
-const FALLBACK_PUNCHLINES: readonly string[] = [
+export const FALLBACK_PUNCHLINES: readonly string[] = [
   'это был смелый план ровно до первой минуты.',
   'я сделал вид, что именно так и задумал.',
   'соседи теперь аплодируют и боятся.',
   'я получил опыт и счет за ущерб.',
   'главное произнести это уверенно.'
 ] as const
+
+export const FALLBACK_PUNCHLINE_SET: ReadonlySet<string> = new Set(FALLBACK_PUNCHLINES)
 
 @Injectable()
 export class AiService {
@@ -56,10 +58,12 @@ export class AiService {
     readonly goldenExamples: readonly string[]
     readonly excludedOpenings?: readonly string[]
   }): Promise<readonly string[]> {
+    const startMs = Date.now()
     const candidateCount = input.needed * CANDIDATE_MULTIPLIER
     const excluded = input.excludedOpenings ?? []
-    this.logger.log(`generate_all_openings needed=${input.needed} candidates=${candidateCount} excluded=${excluded.length}`)
+    this.logger.log(`generate_all_openings_start needed=${input.needed} candidates=${candidateCount} excluded=${excluded.length}`)
 
+    const stage1Start = Date.now()
     const candidates = await this.generateOpeningCandidates(
       candidateCount,
       input.playerNames,
@@ -67,32 +71,36 @@ export class AiService {
       input.goldenExamples,
       excluded
     )
+    const stage1Ms = Date.now() - stage1Start
 
     const deduped = this.dedupeAgainstExisting(candidates, excluded)
 
     if (deduped.length === 0) {
-      this.logger.warn('generate_all_openings_no_candidates')
+      this.logger.warn(`generate_all_openings_no_candidates stage1_ms=${stage1Ms} total_ms=${Date.now() - startMs}`)
       return []
     }
 
     if (deduped.length <= input.needed) {
-      this.logger.log(`generate_all_openings_skip_filter candidates=${deduped.length} needed=${input.needed}`)
+      this.logger.log(`generate_all_openings_skip_filter candidates=${deduped.length} needed=${input.needed} stage1_ms=${stage1Ms} total_ms=${Date.now() - startMs}`)
       return deduped
     }
 
+    const stage2Start = Date.now()
     const filtered = await this.filterOpenings(
       deduped,
       input.needed,
       input.goldenExamples,
       input.playerContext
     )
+    const stage2Ms = Date.now() - stage2Start
+    const totalMs = Date.now() - startMs
 
     if (filtered.length >= input.needed) {
-      this.logger.log(`generate_all_openings_ok filtered=${filtered.length}`)
+      this.logger.log(`generate_all_openings_ok filtered=${filtered.length} stage1_ms=${stage1Ms} stage2_ms=${stage2Ms} total_ms=${totalMs}`)
       return filtered
     }
 
-    this.logger.warn(`generate_all_openings_partial filtered=${filtered.length} needed=${input.needed} using_candidates_as_fallback`)
+    this.logger.warn(`generate_all_openings_partial filtered=${filtered.length} needed=${input.needed} stage1_ms=${stage1Ms} stage2_ms=${stage2Ms} total_ms=${totalMs} using_candidates_as_fallback`)
     return deduped.slice(0, input.needed)
   }
 
@@ -156,7 +164,10 @@ export class AiService {
 
   public async generateBotAnswer(input: AiBotAnswerInput): Promise<string> {
     const startMs = Date.now()
+    const memoryStart = Date.now()
     const memoryExamples = await this.retrieveMemoryExamples(input.prompt)
+    const memoryMs = Date.now() - memoryStart
+    this.logger.log(`bot_punchline_memory prompt="${input.prompt.slice(0, 60)}" examples=${memoryExamples.length} memory_ms=${memoryMs}`)
     const userMessage = createBotPunchlineUserPrompt(
       input.prompt,
       input.styleTag,
@@ -171,7 +182,7 @@ export class AiService {
     const cleaned = this.postProcessBotAnswer(content, input.prompt)
     const result = botAnswerSchema.safeParse(cleaned)
     if (result.success) {
-      this.logger.log(`\n--- PUNCHLINE ---\n  prompt: "${input.prompt}"\n  raw: "${content.slice(0, 200)}"\n  final: "${result.data}"`)
+      this.logger.log(`\n--- PUNCHLINE (style=${input.styleTag} darkness=${input.darknessLevel} latency_ms=${latencyMs} memory_examples=${memoryExamples.length}) ---\n  prompt: "${input.prompt}"\n  raw: "${content.slice(0, 200)}"\n  final: "${result.data}"`)
       return result.data
     }
     this.fallbackResponses += 1
@@ -232,14 +243,14 @@ export class AiService {
         timeout: CLAUDE_TIMEOUT_MS
       })
 
-      proc.stdin.write(userMessage)
-      proc.stdin.end()
+      proc.stdin?.write(userMessage)
+      proc.stdin?.end()
 
       const chunks: Buffer[] = []
       const errChunks: Buffer[] = []
 
-      proc.stdout.on('data', (data: Buffer) => chunks.push(data))
-      proc.stderr.on('data', (data: Buffer) => errChunks.push(data))
+      proc.stdout?.on('data', (data: Buffer) => chunks.push(data))
+      proc.stderr?.on('data', (data: Buffer) => errChunks.push(data))
 
       proc.on('error', (err) => {
         const elapsedMs = Date.now() - startMs

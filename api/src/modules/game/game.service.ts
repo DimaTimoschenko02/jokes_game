@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
-import { AiService } from '../ai/ai.service'
+import { AiService, FALLBACK_PUNCHLINE_SET } from '../ai/ai.service'
 import { JokeMemoryService } from '../joke-memory/joke-memory.service'
 import { PromptStarterService } from '../prompt-starter/prompt-starter.service'
 import {
@@ -35,6 +35,9 @@ type BroadcastFn = (roomCode: string) => void
 
 const BOT_STYLES: readonly string[] = ['sarcastic', 'chaotic', 'dark', 'absurd', 'bold'] as const
 const LOCAL_FALLBACK_ANSWER: string = 'это звучало лучше в моей голове.'
+
+const isFallbackPunchline = (punchline: string): boolean =>
+  FALLBACK_PUNCHLINE_SET.has(punchline) || punchline === LOCAL_FALLBACK_ANSWER
 
 @Injectable()
 export class GameService {
@@ -85,12 +88,14 @@ export class GameService {
       timerEndsAt: null,
       isStarting: false,
       timerHandle: null,
-      prefetchOpeningsPromise: null
+      prefetchOpeningsPromise: null,
+      aiStatus: 'idle'
     }
     this.createBots(room)
     this.rooms.set(roomCode, room)
     this.socketLinks.set(input.socketId, { roomCode, playerId: host.id })
     this.emitRoomState(roomCode)
+    this.prefetchNextRoundOpenings(room)
     return { roomCode, playerId: host.id }
   }
 
@@ -101,6 +106,7 @@ export class GameService {
     room.players.set(player.id, player)
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })
     this.emitRoomState(room.code)
+    this.prefetchNextRoundOpenings(room)
     return { roomCode: room.code, playerId: player.id }
   }
 
@@ -146,8 +152,9 @@ export class GameService {
     try {
       this.resetPlayerScores(room)
       room.roundIndex = 0
-      room.allOpenings = []
-      room.prefetchOpeningsPromise = null
+      if (room.prefetchOpeningsPromise) {
+        await room.prefetchOpeningsPromise.catch(() => undefined)
+      }
       await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
     } finally {
@@ -166,7 +173,8 @@ export class GameService {
     const playerContext = buildPlayerContext(room.players)
     const goldenExamples = await this.promptStarterService.getGoldenExamples(10)
 
-    this.logger.log(`generate_round_openings room=${room.code} round=${roundNumber} needed=${needed} already=${room.allOpenings.length}`)
+    const startMs = Date.now()
+    this.logger.log(`generate_round_openings room=${room.code} round=${roundNumber} needed=${needed} already=${room.allOpenings.length} golden_examples=${goldenExamples.length}`)
 
     const openings = await this.aiService.generateAllOpenings({
       needed,
@@ -176,18 +184,21 @@ export class GameService {
       excludedOpenings: room.allOpenings
     })
 
+    const elapsedMs = Date.now() - startMs
+
     if (openings.length >= needed) {
       room.allOpenings.push(...openings)
-      this.logger.log(`generate_round_openings_ok room=${room.code} round=${roundNumber} count=${openings.length}`)
+      this.logger.log(`generate_round_openings_ok room=${room.code} round=${roundNumber} count=${openings.length} elapsed_ms=${elapsedMs} source=ai`)
       return
     }
 
-    this.logger.warn(`generate_round_openings_insufficient room=${room.code} round=${roundNumber} got=${openings.length} needed=${needed} falling_back`)
+    this.logger.warn(`generate_round_openings_insufficient room=${room.code} round=${roundNumber} got=${openings.length} needed=${needed} elapsed_ms=${elapsedMs} falling_back_to_db`)
     const fallbackPrompts = await this.promptStarterService.selectPrompts({
       count: needed - openings.length,
       excludedTexts: [...room.allOpenings, ...openings]
     })
     room.allOpenings.push(...openings, ...fallbackPrompts)
+    this.logger.log(`generate_round_openings_with_fallback room=${room.code} round=${roundNumber} ai=${openings.length} db=${fallbackPrompts.length} elapsed_ms=${elapsedMs}`)
   }
 
   private prefetchNextRoundOpenings(room: GameRoom): void {
@@ -201,16 +212,24 @@ export class GameService {
     const playerCount = room.players.size
     const offset = (nextRound - 1) * playerCount
     if (room.allOpenings.length >= offset + playerCount) {
+      room.aiStatus = 'ready'
+      this.emitRoomState(room.code)
       return
     }
     this.logger.log(`prefetch_round_openings_start room=${room.code} round=${nextRound}`)
+    room.aiStatus = 'generating'
+    this.emitRoomState(room.code)
     room.prefetchOpeningsPromise = this.generateOpeningsForRound(room, nextRound)
       .then(() => {
         this.logger.log(`prefetch_round_openings_done room=${room.code} round=${nextRound}`)
+        room.aiStatus = 'ready'
+        this.emitRoomState(room.code)
         return room.allOpenings.slice(offset, offset + playerCount)
       })
       .catch((err) => {
         this.logger.warn(`prefetch_round_openings_failed room=${room.code} round=${nextRound} error=${(err as Error).message}`)
+        room.aiStatus = 'idle'
+        this.emitRoomState(room.code)
         return []
       })
       .finally(() => {
@@ -404,6 +423,7 @@ export class GameService {
     room.prompts = roundOpenings
     room.usedPromptTexts.push(...roundOpenings)
     room.promptAssignments = buildCircularPromptAssignments(playerIds)
+    this.logger.log(`writing_phase_start room=${room.code} round=${room.roundIndex}/${room.roundCount} players=${playerCount} bots=${Array.from(room.players.values()).filter((p) => p.isBot).length}`)
     room.players.forEach((player) => {
       const assignment = room.promptAssignments.get(player.id)
       if (!assignment) {
@@ -519,6 +539,7 @@ export class GameService {
     room.duels = createDuelsForPrompts(room)
     room.duelIndex = 0
     room.ratingItems = createRatingItems(room)
+    this.logger.log(`voting_phase_start room=${room.code} round=${room.roundIndex} duels=${room.duels.length} rating_items=${room.ratingItems.length}`)
     this.emitRoomState(room.code)
     this.scheduleBotVote(room)
     this.setRoomTimer(room, VOTING_PHASE_SECONDS, () => this.advanceVoting(room.code))
@@ -600,6 +621,7 @@ export class GameService {
   private startRatingPhase(room: GameRoom): void {
     room.phase = 'rating'
     room.ratingSubmissions = new Map()
+    this.logger.log(`rating_phase_start room=${room.code} round=${room.roundIndex} items=${room.ratingItems.length}`)
     this.emitRoomState(room.code)
     this.setRoomTimer(room, RATING_PHASE_SECONDS, () => this.finishRatingPhase(room.code))
   }
@@ -636,6 +658,8 @@ export class GameService {
 
   private startScoreboardPhase(room: GameRoom): void {
     room.phase = 'scoreboard'
+    const totals = Array.from(room.players.values()).map((p) => `${p.name}=${p.score}`).join(' ')
+    this.logger.log(`scoreboard_phase_start room=${room.code} round=${room.roundIndex} totals=[${totals}]`)
     this.emitRoomState(room.code)
     this.setRoomTimer(room, SCOREBOARD_PHASE_SECONDS, () => this.advanceRound(room.code))
   }
@@ -648,6 +672,8 @@ export class GameService {
     if (room.roundIndex >= room.roundCount) {
       room.phase = 'finished'
       this.clearRoomTimer(room)
+      const totals = Array.from(room.players.values()).map((p) => `${p.name}=${p.score}`).join(' ')
+      this.logger.log(`game_finished room=${room.code} rounds=${room.roundCount} final_scores=[${totals}]`)
       this.emitRoomState(room.code)
       this.evaluateAndSaveGoldenOpenings(room)
       return
@@ -673,7 +699,8 @@ export class GameService {
       writingSubmitters: this.getWritingSubmitters(room),
       ratingSubmitters: this.getRatingSubmitters(room),
       ratingItems: room.ratingItems,
-      timerSecondsLeft: this.getTimerSecondsLeft(room.timerEndsAt)
+      timerSecondsLeft: this.getTimerSecondsLeft(room.timerEndsAt),
+      aiStatus: room.aiStatus
     }
   }
 
@@ -898,6 +925,10 @@ export class GameService {
   ): void {
     const player = room.players.get(item.authorPlayerId)
     if (!player || !item.punchline || !item.prompt) {
+      return
+    }
+    if (isFallbackPunchline(item.punchline)) {
+      this.logger.log(`joke_memory_skip_fallback room=${room.code} round=${room.roundIndex} prompt="${item.prompt.slice(0, 60)}" punchline="${item.punchline.slice(0, 60)}"`)
       return
     }
     const votesFor = votes?.votesFor ?? 0

@@ -571,6 +571,59 @@ button:disabled {
   font-size: 14px;
 }
 
+.aiStatusBadge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--confirm-border);
+  background: var(--confirm-bg);
+  color: var(--confirm-text);
+  transition: background 0.3s ease, border 0.3s ease;
+}
+
+.aiStatusBadge.aiStatus-generating {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(125, 90, 255, 0.08), rgba(255, 105, 180, 0.08));
+  color: var(--text);
+}
+
+.aiStatusBadge.aiStatus-ready {
+  animation: confirmBannerIn 0.45s ease;
+}
+
+.aiStatusBadge.aiStatus-idle {
+  opacity: 0.6;
+}
+
+.aiSpinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(125, 90, 255, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: aiSpin 0.8s linear infinite;
+}
+
+.aiSpinnerInline {
+  margin-right: 8px;
+  vertical-align: -3px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+
+.aiCheck {
+  font-size: 18px;
+}
+
+@keyframes aiSpin {
+  to { transform: rotate(360deg); }
+}
+
 /* ===== Confirm banner ===== */
 .confirmBanner {
   margin: 0;

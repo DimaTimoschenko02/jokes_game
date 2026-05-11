@@ -19,4 +19,5 @@ export type ClientGameState = {
   readonly ratingSubmitters: readonly string[]
   readonly ratingItems: readonly RatingItem[]
   readonly timerSecondsLeft: number | null
+  readonly aiStatus: 'idle' | 'generating' | 'ready'
 }

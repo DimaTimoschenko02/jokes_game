@@ -26,4 +26,5 @@ export type GameRoom = {
   timerHandle: NodeJS.Timeout | null
   isStarting: boolean
   prefetchOpeningsPromise: Promise<readonly string[]> | null
+  aiStatus: 'idle' | 'generating' | 'ready'
 }

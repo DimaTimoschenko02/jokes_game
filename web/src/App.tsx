@@ -66,6 +66,7 @@ function App(): ReactElement {
   const [answersBtnPulse, setAnswersBtnPulse] = useState<boolean>(false)
   const [ratingsBtnPulse, setRatingsBtnPulse] = useState<boolean>(false)
   const [linkCopied, setLinkCopied] = useState<boolean>(false)
+  const [isStartingGame, setIsStartingGame] = useState<boolean>(false)
   const [localTimer, setLocalTimer] = useState<number | null>(null)
   const [theme, setTheme] = useState<AppTheme>(getStoredTheme)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -174,6 +175,13 @@ function App(): ReactElement {
       }
     }
   }, [gameState?.timerSecondsLeft, gameState?.phase, gameState?.duelIndex])
+
+  // Reset starting flag once phase advances away from lobby
+  useEffect(() => {
+    if (gameState?.phase && gameState.phase !== 'lobby') {
+      setIsStartingGame(false)
+    }
+  }, [gameState?.phase])
 
   // Reset answers between rounds
   useEffect(() => {
@@ -317,6 +325,7 @@ function App(): ReactElement {
             <label className="inputGroup">
               <span>Раунды</span>
               <select value={roundCount} onChange={(event) => setRoundCount(Number(event.target.value))}>
+                <option value={2}>2</option>
                 <option value={3}>3</option>
                 <option value={4}>4</option>
               </select>
@@ -418,9 +427,42 @@ function App(): ReactElement {
             <button className="secondary copyLinkBtn" onClick={handleCopyRoomLink}>
               {linkCopied ? 'Ссылка скопирована!' : 'Скопировать ссылку на комнату'}
             </button>
+            <div className={`aiStatusBadge aiStatus-${gameState.aiStatus}`}>
+              {gameState.aiStatus === 'generating' && (
+                <>
+                  <span className="aiSpinner" aria-hidden />
+                  <span>AI готовит начала шуток...</span>
+                </>
+              )}
+              {gameState.aiStatus === 'ready' && (
+                <>
+                  <span className="aiCheck" aria-hidden>✨</span>
+                  <span>Шутки готовы — можно начинать!</span>
+                </>
+              )}
+              {gameState.aiStatus === 'idle' && (
+                <span>Ожидание начала генерации...</span>
+              )}
+            </div>
             {canStart && (
-              <button className="primary" onClick={() => executeStartGame({ roomCode: session.roomCode })}>
-                Начать игру
+              <button
+                className="primary"
+                disabled={isStartingGame || gameState.aiStatus === 'generating'}
+                onClick={() => {
+                  setIsStartingGame(true)
+                  executeStartGame({ roomCode: session.roomCode })
+                }}
+              >
+                {isStartingGame ? (
+                  <>
+                    <span className="aiSpinner aiSpinnerInline" aria-hidden />
+                    Запускаем игру...
+                  </>
+                ) : gameState.aiStatus === 'generating' ? (
+                  'Ждём AI...'
+                ) : (
+                  'Начать игру'
+                )}
               </button>
             )}
           </div>
