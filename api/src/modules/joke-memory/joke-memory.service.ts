@@ -50,7 +50,7 @@ export class JokeMemoryService {
         : null
     const existing = await this.jokeMemoryRepository.findByFingerprint(prompt, punchline)
     if (existing) {
-      await this.jokeMemoryRepository.mergeCounters(String(existing._id), {
+      await this.jokeMemoryRepository.mergeCounters(existing.id, {
         votesFor,
         votesAgainst,
         ratingSum: ratingSum ?? undefined,

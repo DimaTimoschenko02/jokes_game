@@ -1,13 +1,22 @@
 services:
   # ── Infrastructure (always needed) ──────────────────────────────
-  mongo:
-    image: mongo:7
-    container_name: punchme-mongo
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: punchme-postgres
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: punchme
+      POSTGRES_PASSWORD: punchme
+      POSTGRES_DB: punchme
     ports:
-      - '27017:27017'
+      - '5433:5432'
     volumes:
-      - punchme-mongo-data:/data/db
+      - punchme-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U punchme -d punchme']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   ollama:
     image: ollama/ollama:latest
@@ -49,12 +58,12 @@ services:
       PORT: 4000
       OLLAMA_BASE_URL: http://ollama:11434
       OLLAMA_EMBED_MODEL: bge-m3
-      MONGO_URI: mongodb://mongo:27017/punchme
+      DATABASE_URL: postgres://punchme:punchme@postgres:5432/punchme
     ports:
       - '4000:4000'
     depends_on:
-      mongo:
-        condition: service_started
+      postgres:
+        condition: service_healthy
       ollama:
         condition: service_healthy
     profiles:
@@ -89,5 +98,5 @@ services:
       - tunnel
 
 volumes:
-  punchme-mongo-data:
+  punchme-postgres-data:
   punchme-ollama-data:

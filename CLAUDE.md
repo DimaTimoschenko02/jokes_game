@@ -4,10 +4,10 @@ Party game для друзей в браузере. Игроки + AI-боты �
 
 ## Стек
 
-- **Backend:** NestJS 11, Socket.IO, Mongoose (MongoDB), Zod, class-validator
+- **Backend:** NestJS 11, Socket.IO, Drizzle ORM (PostgreSQL + pgvector), Zod, class-validator
 - **Frontend:** React 19, Vite 8, Socket.IO client
 - **AI:** Claude CLI (sonnet, effort high) for joke generation; Ollama BGE-M3 for embeddings only
-- **Infra:** Docker Compose (mongo, ollama — infra only), local dev via npm scripts
+- **Infra:** Docker Compose (postgres, ollama — infra only), local dev via npm scripts
 - **Язык:** TypeScript (strict), Russian UI, English code
 
 ## Архитектура
@@ -16,7 +16,7 @@ Party game для друзей в браузере. Игроки + AI-боты �
 api/src/modules/
 ├── game/            — WebSocket gateway + service: rooms, rounds, duels, voting, ratings, bot orchestration
 ├── ai/              — Claude CLI integration, two-stage opening generation, bot punchlines, prompt templates
-├── prompt-starter/  — MongoDB-backed joke openings, golden openings feedback loop, seed data
+├── prompt-starter/  — PG-backed joke openings, golden openings feedback loop, seed data
 ├── joke-memory/     — Joke storage, quality scoring, few-shot retrieval, finetune export
 ├── embedding/       — Text embeddings via Ollama (BGE-M3)
 ├── admin/           — Admin UI + guard
@@ -44,15 +44,17 @@ web/src/
 ### Локальная разработка (основной режим)
 
 ```bash
-npm run infra          # Поднять MongoDB + Ollama (Docker)
+npm run infra          # Поднять PostgreSQL + Ollama (Docker)
 npm run setup          # Первый раз: скачать BGE-M3 модель для embeddings
 npm run dev            # API (:4000) + Web (:5173) параллельно
 npm run dev:api        # Только API
 npm run dev:web        # Только Web
 ```
 
-API дефолтит на `mongodb://localhost:27017/punchme` и `http://127.0.0.1:11434` (Ollama).
+API дефолтит на `postgres://punchme:punchme@localhost:5433/punchme` и `http://127.0.0.1:11434` (Ollama).
 AI генерация через Claude CLI (должен быть установлен и авторизован).
+
+Drizzle: `npm run db:generate` после изменения схемы, миграции применяются на старте API автоматически. Для отладки — `npm run db:studio`.
 
 ### Docker production
 

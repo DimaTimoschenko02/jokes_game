@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common'
-import { InjectModel } from '@nestjs/mongoose'
-import { Model } from 'mongoose'
+import { Inject, Injectable } from '@nestjs/common'
+import { desc, eq, sql } from 'drizzle-orm'
+import { DATABASE } from '../../db/db.module'
+import { jokeMemory } from '../../db/schema/joke-memory.schema'
+import { Db } from '../../db/db.types'
 import { JokeMemoryEntry } from './models/joke-memory-entry.type'
-import { JokeMemoryDocument, JokeMemoryDocumentModel } from './schemas/joke-memory.schema'
 import { JokeMemoryWriteInput } from './models/joke-memory-write-input.type'
 
 export type JokeMemoryCounterMerge = {
@@ -14,66 +15,114 @@ export type JokeMemoryCounterMerge = {
 
 @Injectable()
 export class JokeMemoryRepository {
-  public constructor(
-    @InjectModel(JokeMemoryDocumentModel.name)
-    private readonly jokeMemoryModel: Model<JokeMemoryDocument>
-  ) {}
+  public constructor(@Inject(DATABASE) private readonly db: Db) {}
 
   public async createEntry(input: JokeMemoryWriteInput): Promise<void> {
-    await this.jokeMemoryModel.create({
-      prompt: input.prompt,
-      punchline: input.punchline,
-      promptNormalized: input.prompt.toLowerCase(),
-      fingerprint: this.buildFingerprint(input.prompt, input.punchline),
-      promptEmbedding: input.promptEmbedding ? Array.from(input.promptEmbedding) : undefined,
-      embeddingModel: input.embeddingModel,
-      votesFor: input.votesFor,
-      votesAgainst: input.votesAgainst,
-      voteShare: input.voteShare,
-      qualityScore: input.qualityScore,
-      ratingAverage: input.ratingAverage,
-      ratingSum: input.ratingSum,
-      ratingCount: input.ratingCount,
-      authorUserId: input.authorUserId,
-      authorRealName: input.authorRealName,
-      source: input.source,
-      roomCode: input.roomCode,
-      roundIndex: input.roundIndex
-    })
+    const fingerprint: string = this.buildFingerprint(input.prompt, input.punchline)
+    await this.db
+      .insert(jokeMemory)
+      .values({
+        prompt: input.prompt,
+        punchline: input.punchline,
+        promptNormalized: input.prompt.toLowerCase(),
+        fingerprint,
+        promptEmbedding: input.promptEmbedding ? Array.from(input.promptEmbedding) : null,
+        embeddingModel: input.embeddingModel,
+        votesFor: input.votesFor,
+        votesAgainst: input.votesAgainst,
+        voteShare: input.voteShare,
+        qualityScore: input.qualityScore,
+        ratingAverage: input.ratingAverage,
+        ratingSum: input.ratingSum,
+        ratingCount: input.ratingCount,
+        authorUserId: input.authorUserId,
+        authorRealName: input.authorRealName,
+        source: input.source,
+        roomCode: input.roomCode,
+        roundIndex: input.roundIndex
+      })
+      .onConflictDoUpdate({
+        target: jokeMemory.fingerprint,
+        set: {
+          votesFor: sql`${jokeMemory.votesFor} + EXCLUDED.votes_for`,
+          votesAgainst: sql`${jokeMemory.votesAgainst} + EXCLUDED.votes_against`,
+          ratingSum: sql`COALESCE(${jokeMemory.ratingSum}, 0) + COALESCE(EXCLUDED.rating_sum, 0)`,
+          ratingCount: sql`COALESCE(${jokeMemory.ratingCount}, 0) + COALESCE(EXCLUDED.rating_count, 0)`
+        }
+      })
   }
 
   public async findByFingerprint(
     prompt: string,
     punchline: string
-  ): Promise<JokeMemoryDocument | null> {
+  ): Promise<{ readonly id: string } | null> {
     const fingerprint: string = this.buildFingerprint(prompt, punchline)
-    return this.jokeMemoryModel.findOne({ fingerprint }).exec()
+    const rows = await this.db
+      .select({ id: jokeMemory.id })
+      .from(jokeMemory)
+      .where(eq(jokeMemory.fingerprint, fingerprint))
+      .limit(1)
+    return rows[0] ?? null
   }
 
   public async mergeCounters(
     documentId: string,
     merge: JokeMemoryCounterMerge
   ): Promise<void> {
-    const inc: Record<string, number> = {
-      votesFor: merge.votesFor,
-      votesAgainst: merge.votesAgainst
-    }
-    if (merge.ratingSum !== undefined) {
-      inc.ratingSum = merge.ratingSum
-    }
-    if (merge.ratingCount !== undefined) {
-      inc.ratingCount = merge.ratingCount
-    }
-    await this.jokeMemoryModel.updateOne({ _id: documentId }, { $inc: inc }).exec()
+    await this.db
+      .update(jokeMemory)
+      .set({
+        votesFor: sql`${jokeMemory.votesFor} + ${merge.votesFor}`,
+        votesAgainst: sql`${jokeMemory.votesAgainst} + ${merge.votesAgainst}`,
+        ratingSum:
+          merge.ratingSum !== undefined
+            ? sql`COALESCE(${jokeMemory.ratingSum}, 0) + ${merge.ratingSum}`
+            : jokeMemory.ratingSum,
+        ratingCount:
+          merge.ratingCount !== undefined
+            ? sql`COALESCE(${jokeMemory.ratingCount}, 0) + ${merge.ratingCount}`
+            : jokeMemory.ratingCount
+      })
+      .where(eq(jokeMemory.id, documentId))
   }
 
   public async findRecent(limit: number): Promise<readonly JokeMemoryEntry[]> {
-    return this.jokeMemoryModel
-      .find()
-      .sort({ createdAt: -1 })
+    const rows = await this.db
+      .select()
+      .from(jokeMemory)
+      .orderBy(desc(jokeMemory.createdAt))
       .limit(limit)
-      .lean<JokeMemoryEntry[]>()
-      .exec()
+    return rows.map((row) => this.toEntry(row))
+  }
+
+  private toEntry(row: typeof jokeMemory.$inferSelect): JokeMemoryEntry {
+    return {
+      prompt: row.prompt,
+      punchline: row.punchline,
+      promptNormalized: row.promptNormalized,
+      fingerprint: row.fingerprint,
+      promptEmbedding: row.promptEmbedding ?? undefined,
+      embeddingModel: row.embeddingModel ?? undefined,
+      votesFor: row.votesFor,
+      votesAgainst: row.votesAgainst,
+      voteShare: row.voteShare,
+      qualityScore: row.qualityScore,
+      ratingAverage: row.ratingAverage ?? undefined,
+      ratingSum: row.ratingSum ?? undefined,
+      ratingCount: row.ratingCount ?? undefined,
+      adminScore: row.adminScore ?? undefined,
+      adminScoredBy: row.adminScoredBy ?? undefined,
+      adminScoredAt: row.adminScoredAt ?? undefined,
+      adminComment: row.adminComment ?? undefined,
+      usedAsExampleCount: row.usedAsExampleCount,
+      lastUsedAsExampleAt: row.lastUsedAsExampleAt ?? undefined,
+      authorUserId: row.authorUserId ?? undefined,
+      authorRealName: row.authorRealName ?? undefined,
+      source: row.source,
+      roomCode: row.roomCode,
+      roundIndex: row.roundIndex,
+      createdAt: row.createdAt
+    }
   }
 
   private buildFingerprint(prompt: string, punchline: string): string {

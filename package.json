@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "description": "party joke game",
   "scripts": {
-    "dev": "docker compose up -d mongo ollama && concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev": "docker compose up -d postgres ollama && concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "cd api && npm run dev",
     "dev:web": "cd web && npm run dev",
-    "infra": "docker compose up -d mongo ollama",
+    "infra": "docker compose up -d postgres ollama",
     "infra:stop": "docker compose down",
     "setup": "docker compose --profile setup run --rm model-pull",
     "docker": "docker compose --profile production up --build -d",
