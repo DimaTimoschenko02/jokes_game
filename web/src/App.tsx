@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
+import { useAuth } from './auth/auth-context'
 import type { ClientPlayer } from './models/client-player.type'
 import type { GamePhase } from './models/game-phase.type'
 import type { RatingItem } from './models/rating-item.type'
 import { useGameClient } from './hooks/use-game-client'
+import { AuthView } from './views/AuthView'
+import { ProfileView } from './views/ProfileView'
 
 type AppTheme = 'light' | 'gray' | 'dark'
 const THEMES: readonly AppTheme[] = ['light', 'gray', 'dark']
@@ -34,6 +37,8 @@ const DEFAULT_ROUNDS: number = 4
 const DEFAULT_BOTS: number = 1
 const ROOM_CODE_LENGTH: number = 5
 
+type FeedbackVerdict = 'up' | 'down' | 'broken'
+
 const getPlayerNameById = (players: readonly ClientPlayer[], playerId: string): string => {
   const player = players.find((item) => item.id === playerId)
   return player?.name ?? '???'
@@ -51,12 +56,33 @@ const getRoomCodeFromUrl = (): string | null => {
   return params.get('room')?.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, ROOM_CODE_LENGTH) ?? null
 }
 
-const BIO_KEY = 'punchme-bio'
-const BIO_MAX_LENGTH = 200
-
 function App(): ReactElement {
-  const [displayName, setDisplayName] = useState<string>('')
-  const [bio, setBio] = useState<string>(() => localStorage.getItem(BIO_KEY) ?? '')
+  const { user, token, status, logout } = useAuth()
+  const [view, setView] = useState<'game' | 'profile'>('game')
+  const [theme, setTheme] = useState<AppTheme>(getStoredTheme)
+
+  useEffect(() => {
+    applyTheme(theme)
+  }, [theme])
+
+  const handleAuthError = useCallback((): void => {
+    logout()
+  }, [logout])
+
+  const {
+    gameState,
+    session,
+    errorMessage,
+    executeLeaveRoom,
+    executeCreateRoom,
+    executeJoinRoom,
+    executeStartGame,
+    executeSubmitAnswers,
+    executeCastVote,
+    executeSubmitRatings,
+    executeSubmitOpeningFeedback
+  } = useGameClient({ token, onAuthError: handleAuthError })
+
   const [roomCodeToJoin, setRoomCodeToJoin] = useState<string>(getRoomCodeFromUrl() ?? '')
   const [roundCount, setRoundCount] = useState<number>(DEFAULT_ROUNDS)
   const [botCount, setBotCount] = useState<number>(DEFAULT_BOTS)
@@ -68,27 +94,9 @@ function App(): ReactElement {
   const [linkCopied, setLinkCopied] = useState<boolean>(false)
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false)
   const [localTimer, setLocalTimer] = useState<number | null>(null)
-  const [theme, setTheme] = useState<AppTheme>(getStoredTheme)
+  const [openingFeedback, setOpeningFeedback] = useState<Record<number, FeedbackVerdict>>({})
+  const [openingFeedbackSent, setOpeningFeedbackSent] = useState<boolean>(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    applyTheme(theme)
-  }, [theme])
-  useEffect(() => {
-    localStorage.setItem(BIO_KEY, bio)
-  }, [bio])
-  const {
-    gameState,
-    session,
-    errorMessage,
-    executeLeaveRoom,
-    executeCreateRoom,
-    executeJoinRoom,
-    executeStartGame,
-    executeSubmitAnswers,
-    executeCastVote,
-    executeSubmitRatings
-  } = useGameClient()
 
   const me = useMemo(() => gameState?.players.find((player) => player.id === session?.playerId) ?? null, [gameState, session])
   const myAssignment = useMemo(
@@ -144,7 +152,6 @@ function App(): ReactElement {
       ? Math.max(0, Math.min(1, displaySeconds / timerTotalSeconds))
       : null
 
-  // Client-side timer countdown
   useEffect(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current)
@@ -176,42 +183,53 @@ function App(): ReactElement {
     }
   }, [gameState?.timerSecondsLeft, gameState?.phase, gameState?.duelIndex])
 
-  // Reset starting flag once phase advances away from lobby
   useEffect(() => {
     if (gameState?.phase && gameState.phase !== 'lobby') {
       setIsStartingGame(false)
     }
   }, [gameState?.phase])
 
-  // Reset answers between rounds
   useEffect(() => {
     if (gameState?.phase === 'writing') {
       setAnswers(['', ''])
+      setOpeningFeedback({})
+      setOpeningFeedbackSent(false)
     }
   }, [gameState?.roundIndex])
 
-  // Reset ratings between rounds
   useEffect(() => {
     if (gameState?.phase === 'rating') {
       setRatings({})
     }
   }, [gameState?.phase, gameState?.roundIndex])
 
+  const flushOpeningFeedback = useCallback((): void => {
+    if (!session || openingFeedbackSent) {
+      return
+    }
+    const items = Object.entries(openingFeedback).map(([promptIndex, verdict]) => ({
+      promptIndex: Number(promptIndex),
+      verdict
+    }))
+    if (items.length === 0) {
+      return
+    }
+    executeSubmitOpeningFeedback({ roomCode: session.roomCode, items })
+    setOpeningFeedbackSent(true)
+  }, [executeSubmitOpeningFeedback, openingFeedback, openingFeedbackSent, session])
+
+  useEffect(() => {
+    if (gameState?.phase && gameState.phase !== 'writing' && !openingFeedbackSent) {
+      flushOpeningFeedback()
+    }
+  }, [gameState?.phase, flushOpeningFeedback, openingFeedbackSent])
+
   const handleCreateRoom = (): void => {
-    executeCreateRoom({
-      name: displayName.trim() || 'Host',
-      roundCount,
-      botCount,
-      bio: bio.trim() || undefined
-    })
+    executeCreateRoom({ roundCount, botCount })
   }
 
   const handleJoinRoom = (): void => {
-    executeJoinRoom({
-      roomCode: roomCodeToJoin.toUpperCase().slice(0, ROOM_CODE_LENGTH),
-      name: displayName.trim() || 'Player',
-      bio: bio.trim() || undefined
-    })
+    executeJoinRoom({ roomCode: roomCodeToJoin.toUpperCase().slice(0, ROOM_CODE_LENGTH) })
   }
 
   const handleSubmit = (): void => {
@@ -226,6 +244,7 @@ function App(): ReactElement {
       roomCode: session.roomCode,
       answers
     })
+    flushOpeningFeedback()
   }
 
   const handleRatingChange = (itemId: string, score: number): void => {
@@ -276,6 +295,18 @@ function App(): ReactElement {
     })
   }, [session])
 
+  const togglePromptFeedback = (promptIndex: number, verdict: FeedbackVerdict): void => {
+    setOpeningFeedback((current) => {
+      const next = { ...current }
+      if (next[promptIndex] === verdict) {
+        delete next[promptIndex]
+      } else {
+        next[promptIndex] = verdict
+      }
+      return next
+    })
+  }
+
   const themeSwitcher = (
     <div className="themeSwitcher">
       {THEMES.map((t) => (
@@ -290,37 +321,46 @@ function App(): ReactElement {
     </div>
   )
 
+  if (status === 'loading') {
+    return (
+      <main className="layout">
+        <section className="panel">
+          <p className="subtitle">Загрузка...</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (!user || !token) {
+    return <AuthView />
+  }
+
+  if (view === 'profile') {
+    return <ProfileView onBack={() => setView('game')} />
+  }
+
   if (!gameState || !session) {
     const hasRoomFromUrl = Boolean(getRoomCodeFromUrl())
     return (
       <main className="layout">
         <section className="panel">
           <div className="header">
-            <h1>PunchMe Party</h1>
+            <div>
+              <h1>PunchMe Party</h1>
+              <p className="subtitle">Привет, {user.displayName} (@{user.login})</p>
+            </div>
             {themeSwitcher}
           </div>
-          <p className="subtitle">Придумывай шутки смешнее друзей и ботов.</p>
           {errorMessage && <p className="subtitle errorText">{errorMessage}</p>}
-          <label className="inputGroup">
-            <span>Твоё имя</span>
-            <input
-              value={displayName}
-              onChange={(event) => setDisplayName(event.target.value)}
-              maxLength={30}
-              placeholder="Введи имя..."
-            />
-          </label>
-          <label className="inputGroup">
-            <span>О себе для AI-шуток <small className="bioHint">({bio.length}/{BIO_MAX_LENGTH})</small></span>
-            <textarea
-              value={bio}
-              onChange={(event) => setBio(event.target.value.slice(0, BIO_MAX_LENGTH))}
-              maxLength={BIO_MAX_LENGTH}
-              placeholder="Чем провокативнее — тем смешнее шутки про тебя. Пример: считаю себя самым умным, место женщин на кухне, боюсь пауков"
-              rows={2}
-              className="bioTextarea"
-            />
-          </label>
+          <div className="row">
+            <button type="button" className="secondary" onClick={() => setView('profile')}>
+              Профиль
+            </button>
+            <button type="button" className="secondary" onClick={logout}>
+              Выйти
+            </button>
+          </div>
+          <div className="divider" />
           <div className="row">
             <label className="inputGroup">
               <span>Раунды</span>
@@ -403,6 +443,9 @@ function App(): ReactElement {
                 <span className="timerHudUnit">сек</span>
               </div>
             </div>
+            <button className="secondary" onClick={() => setView('profile')}>
+              Профиль
+            </button>
             <button className="secondary leaveButton" onClick={executeLeaveRoom}>
               Выйти
             </button>
@@ -472,24 +515,50 @@ function App(): ReactElement {
           <div className={`phaseBlock ${hasSubmittedAnswers ? 'phaseSuccess' : ''}`}>
             <h2>Закончи оба предложения</h2>
             {hasSubmittedAnswers && <p className="confirmBanner">Ответы отправлены — ждём остальных</p>}
-            <label className="inputGroup">
-              <span>{myPromptLabels[0]}</span>
-              <textarea
-                value={answers[0]}
-                disabled={hasSubmittedAnswers}
-                onChange={(event) => setAnswers([event.target.value, answers[1]])}
-                placeholder="Напиши продолжение..."
-              />
-            </label>
-            <label className="inputGroup">
-              <span>{myPromptLabels[1]}</span>
-              <textarea
-                value={answers[1]}
-                disabled={hasSubmittedAnswers}
-                onChange={(event) => setAnswers([answers[0], event.target.value])}
-                placeholder="Напиши продолжение..."
-              />
-            </label>
+            {[0, 1].map((slot) => {
+              const promptText = myPromptLabels[slot]
+              const assignedIndex = myAssignment?.promptIndices[slot]
+              const currentVerdict = assignedIndex != null ? openingFeedback[assignedIndex] : undefined
+              return (
+                <div key={slot} className="inputGroup">
+                  <div className="promptHeader">
+                    <span>{promptText}</span>
+                    {assignedIndex != null && (
+                      <div className="feedbackButtons" role="group" aria-label="Оценка начала шутки">
+                        {(['up', 'down', 'broken'] as const).map((verdict) => (
+                          <button
+                            key={verdict}
+                            type="button"
+                            className={`feedbackBtn ${currentVerdict === verdict ? 'feedbackBtnActive' : ''}`}
+                            disabled={openingFeedbackSent}
+                            onClick={() => togglePromptFeedback(assignedIndex, verdict)}
+                            title={
+                              verdict === 'up'
+                                ? 'Нравится'
+                                : verdict === 'down'
+                                ? 'Не нравится'
+                                : 'Сломанное / странное'
+                            }
+                          >
+                            {verdict === 'up' ? '👍' : verdict === 'down' ? '👎' : '🤢'}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <textarea
+                    value={answers[slot]}
+                    disabled={hasSubmittedAnswers}
+                    onChange={(event) =>
+                      setAnswers(
+                        slot === 0 ? [event.target.value, answers[1]] : [answers[0], event.target.value]
+                      )
+                    }
+                    placeholder="Напиши продолжение..."
+                  />
+                </div>
+              )
+            })}
             <button
               type="button"
               className={`primary ${hasSubmittedAnswers ? 'btnSuccess' : ''} ${answersBtnPulse ? 'btnPulse' : ''}`}

@@ -1,18 +1,15 @@
 import { io, Socket } from 'socket.io-client'
+import { resolveApiBaseUrl } from '../auth/auth-api'
 import type { ClientGameState } from '../models/client-game-state.type'
 import type { PlayerSession } from '../models/player-session.type'
 
 export type CreateRoomPayload = {
-  readonly name: string
   readonly roundCount: number
   readonly botCount: number
-  readonly bio?: string
 }
 
 export type JoinRoomPayload = {
   readonly roomCode: string
-  readonly name: string
-  readonly bio?: string
 }
 
 export type StartGamePayload = {
@@ -35,46 +32,46 @@ export type SubmitRatingsPayload = {
   readonly ratings: readonly { readonly itemId: string; readonly score: number }[]
 }
 
+export type SubmitOpeningFeedbackPayload = {
+  readonly roomCode: string
+  readonly items: readonly { readonly promptIndex: number; readonly verdict: 'up' | 'down' | 'broken' }[]
+}
+
 type GameSocketHandlers = {
   readonly onState: (state: ClientGameState) => void
   readonly onSession: (session: PlayerSession) => void
   readonly onError: (message: string) => void
-}
-
-const getApiUrlFromQuery = (): string | null => {
-  const rawValue = window.location.search
-  const value = new URLSearchParams(rawValue).get('api')
-  return value && value.trim().length > 0 ? value.trim() : null
-}
-
-const resolveApiUrl = (): string => {
-  const queryApiUrl = getApiUrlFromQuery()
-  if (queryApiUrl) {
-    return queryApiUrl
-  }
-  const envApiUrl = import.meta.env.VITE_API_URL
-  if (envApiUrl) {
-    return envApiUrl
-  }
-  return window.location.origin
+  readonly onAuthError: () => void
 }
 
 export class GameSocket {
   private readonly socket: Socket
 
-  public constructor(handlers: GameSocketHandlers, session: PlayerSession | null) {
-    this.socket = io(resolveApiUrl(), {
+  public constructor(
+    handlers: GameSocketHandlers,
+    options: { readonly token: string; readonly session: PlayerSession | null }
+  ) {
+    this.socket = io(resolveApiBaseUrl(), {
       transports: ['websocket'],
-      query: session ? { roomCode: session.roomCode, playerId: session.playerId } : undefined
+      auth: { token: options.token },
+      query: options.session ? { roomCode: options.session.roomCode } : undefined
     })
     this.socket.on('gameState', handlers.onState)
     this.socket.on('session', handlers.onSession)
-    this.socket.on('connect_error', () => handlers.onError('Cannot connect to server'))
+    this.socket.on('connect_error', (error) => {
+      const msg: string = (error as Error).message || ''
+      if (msg.toLowerCase().includes('auth')) {
+        handlers.onAuthError()
+      } else {
+        handlers.onError(msg || 'Cannot connect to server')
+      }
+    })
     this.socket.on('exception', (payload: { readonly message?: string } | string) => {
       const message =
         typeof payload === 'string' ? payload : payload.message ?? 'Server rejected request'
       handlers.onError(message)
     })
+    this.socket.on('authError', () => handlers.onAuthError())
   }
 
   public executeCreateRoom(payload: CreateRoomPayload): void {
@@ -99,6 +96,10 @@ export class GameSocket {
 
   public executeSubmitRatings(payload: SubmitRatingsPayload): void {
     this.socket.emit('submitRatings', payload)
+  }
+
+  public executeSubmitOpeningFeedback(payload: SubmitOpeningFeedbackPayload): void {
+    this.socket.emit('submitOpeningFeedback', payload)
   }
 
   public executeDisconnect(): void {

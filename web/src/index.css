@@ -681,3 +681,134 @@ button:disabled {
   40% { border-color: var(--confirm-border); background: var(--confirm-bg); }
   100% { border-color: var(--card-border); background: var(--card-bg); }
 }
+
+.authTabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.authTabs button {
+  flex: 1;
+  padding: 10px 12px;
+}
+
+.authTabActive {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border-color: var(--accent);
+}
+
+.profileRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--card-border);
+}
+
+.profileRow > span {
+  color: var(--muted-fg, #888);
+}
+
+.profileRow.profileBio {
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.profileBio p {
+  margin: 0;
+}
+
+.promptHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.feedbackButtons {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.feedbackBtn {
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+
+.feedbackBtn:hover:not(:disabled) {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.feedbackBtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.feedbackBtnActive {
+  opacity: 1;
+  border-color: var(--accent);
+  background: var(--confirm-bg, rgba(0, 128, 0, 0.1));
+}
+
+.memoryPortrait {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 12px 0;
+}
+
+.memoryPortrait h3 {
+  margin: 0 0 6px 0;
+}
+
+.memoryThemes,
+.memoryPrefs {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+}
+
+.memoryThemes li,
+.memoryPrefs li {
+  display: grid;
+  grid-template-columns: 130px 1fr 140px;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  font-size: 0.92rem;
+}
+
+.themeName {
+  font-weight: 600;
+}
+
+.themeBar {
+  background: var(--card-border);
+  border-radius: 6px;
+  height: 8px;
+  overflow: hidden;
+  display: block;
+}
+
+.themeBarFill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-end, var(--accent)));
+}
+
+.themeMeta {
+  color: var(--muted-fg, #888);
+  font-size: 0.82rem;
+}

@@ -8,6 +8,7 @@ import {
   type JoinRoomPayload,
   type StartGamePayload,
   type SubmitAnswersPayload,
+  type SubmitOpeningFeedbackPayload,
   type SubmitRatingsPayload
 } from '../socket/game-socket'
 
@@ -29,7 +30,10 @@ const parseStoredSession = (): PlayerSession | null => {
   }
 }
 
-export const useGameClient = (): {
+export const useGameClient = (input: {
+  readonly token: string | null
+  readonly onAuthError: () => void
+}): {
   readonly gameState: ClientGameState | null
   readonly session: PlayerSession | null
   readonly errorMessage: string | null
@@ -40,14 +44,21 @@ export const useGameClient = (): {
   readonly executeSubmitAnswers: (payload: SubmitAnswersPayload) => void
   readonly executeCastVote: (payload: CastVotePayload) => void
   readonly executeSubmitRatings: (payload: SubmitRatingsPayload) => void
+  readonly executeSubmitOpeningFeedback: (payload: SubmitOpeningFeedbackPayload) => void
 } => {
   const [gameState, setGameState] = useState<ClientGameState | null>(null)
   const [session, setSession] = useState<PlayerSession | null>(parseStoredSession)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const socketRef = useRef<GameSocket | null>(null)
+  const onAuthErrorRef = useRef(input.onAuthError)
+  onAuthErrorRef.current = input.onAuthError
 
   useEffect(() => {
     socketRef.current?.executeDisconnect()
+    if (!input.token) {
+      socketRef.current = null
+      return
+    }
     socketRef.current = new GameSocket(
       {
         onState: (state) => {
@@ -59,12 +70,13 @@ export const useGameClient = (): {
           window.localStorage.setItem(SESSION_KEY, JSON.stringify(incomingSession))
           setErrorMessage(null)
         },
-        onError: (message) => setErrorMessage(message)
+        onError: (message) => setErrorMessage(message),
+        onAuthError: () => onAuthErrorRef.current()
       },
-      session
+      { token: input.token, session }
     )
     return () => socketRef.current?.executeDisconnect()
-  }, [session?.roomCode, session?.playerId])
+  }, [input.token, session?.roomCode, session?.playerId])
 
   return useMemo(
     () => ({
@@ -83,7 +95,9 @@ export const useGameClient = (): {
       executeStartGame: (payload: StartGamePayload) => socketRef.current?.executeStartGame(payload),
       executeSubmitAnswers: (payload: SubmitAnswersPayload) => socketRef.current?.executeSubmitAnswers(payload),
       executeCastVote: (payload: CastVotePayload) => socketRef.current?.executeCastVote(payload),
-      executeSubmitRatings: (payload: SubmitRatingsPayload) => socketRef.current?.executeSubmitRatings(payload)
+      executeSubmitRatings: (payload: SubmitRatingsPayload) => socketRef.current?.executeSubmitRatings(payload),
+      executeSubmitOpeningFeedback: (payload: SubmitOpeningFeedbackPayload) =>
+        socketRef.current?.executeSubmitOpeningFeedback(payload)
     }),
     [gameState, session, errorMessage]
   )
