@@ -63,6 +63,23 @@ export class PromptStarterService implements OnModuleInit {
     }))
   }
 
+  public async applyQuickFeedback(input: {
+    readonly promptText: string
+    readonly verdict: 'up' | 'down' | 'broken'
+  }): Promise<void> {
+    await this.repository.applyQuickFeedback(input.promptText, input.verdict)
+  }
+
+  public async getNegativeOpeningExamples(
+    limit: number
+  ): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
+    return this.repository.findLowRatedOpenings({
+      limit,
+      maxFeedbackScore: -0.2,
+      maxAdminScore: 2
+    })
+  }
+
   public async getCompletionsForPrompt(promptText: string): Promise<readonly import('./models/prompt-starter-entry.type').PromptCompletion[]> {
     return this.repository.findBestCompletions({ promptText, limit: 20, minVoteShare: 0 })
   }

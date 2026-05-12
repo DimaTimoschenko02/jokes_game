@@ -33,11 +33,14 @@ import { ClientPlayer } from './models/client-player.type'
 import { GameRoom, GameRoomSessions } from './models/game-room.type'
 import { PlayerSession } from './models/player-session.type'
 import { SocketPlayerLink } from './models/socket-player-link.type'
+import { UserProfile } from '../user/models/user-profile.type'
+import { UserMemoryService } from '../user/user-memory.service'
 import {
   buildCircularPromptAssignments,
   buildPlayerContext,
+  createBotPlayer,
   createDuelsForPrompts,
-  createPlayer,
+  createHumanPlayer,
   createRatingItems,
   createRoomCode,
   createSubmission,
@@ -69,7 +72,8 @@ export class GameService {
     private readonly openingGeneratorAgent: OpeningGeneratorAgentService,
     private readonly openingSelection: OpeningSelectionService,
     private readonly memoryUpdaterAgent: MemoryUpdaterAgentService,
-    private readonly claudeRunner: ClaudeAgentRunnerService
+    private readonly claudeRunner: ClaudeAgentRunnerService,
+    private readonly userMemoryService: UserMemoryService
   ) {}
 
   private createEmptySessions(): GameRoomSessions {
@@ -86,12 +90,18 @@ export class GameService {
 
   public async createRoom(input: {
     readonly socketId: string
-    readonly name: string
+    readonly host: UserProfile
     readonly roundCount: number
     readonly botCount: number
-    readonly bio?: string
   }): Promise<PlayerSession> {
-    const host = createPlayer({ name: input.name, socketId: input.socketId, isBot: false, bio: input.bio })
+    const host = createHumanPlayer({
+      userId: input.host.id,
+      socketId: input.socketId,
+      displayName: input.host.displayName,
+      realName: input.host.realName,
+      bio: input.host.bio,
+      gender: input.host.gender
+    })
     const roomCode = createRoomCode()
     const room: GameRoom = {
       code: roomCode,
@@ -129,10 +139,29 @@ export class GameService {
     return { roomCode, playerId: host.id }
   }
 
-  public joinRoom(input: { readonly socketId: string; readonly roomCode: string; readonly name: string; readonly bio?: string }): PlayerSession {
+  public joinRoom(input: {
+    readonly socketId: string
+    readonly roomCode: string
+    readonly user: UserProfile
+  }): PlayerSession {
     const room = this.getRoomOrFail(input.roomCode)
+    const existing = room.players.get(input.user.id)
+    if (existing && !existing.isBot) {
+      existing.socketId = input.socketId
+      existing.connected = true
+      this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: existing.id })
+      this.emitRoomState(room.code)
+      return { roomCode: room.code, playerId: existing.id }
+    }
     this.ensureLobbyPhase(room)
-    const player = createPlayer({ name: input.name, socketId: input.socketId, isBot: false, bio: input.bio })
+    const player = createHumanPlayer({
+      userId: input.user.id,
+      socketId: input.socketId,
+      displayName: input.user.displayName,
+      realName: input.user.realName,
+      bio: input.user.bio,
+      gender: input.user.gender
+    })
     room.players.set(player.id, player)
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })
     this.emitRoomState(room.code)
@@ -185,7 +214,7 @@ export class GameService {
       if (room.prefetchOpeningsPromise) {
         await room.prefetchOpeningsPromise.catch(() => undefined)
       }
-      room.userMemorySnapshots = this.buildUserMemorySnapshots(room)
+      room.userMemorySnapshots = await this.buildUserMemorySnapshots(room)
       await this.prewarmBotSessions(room)
       await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
@@ -222,9 +251,9 @@ export class GameService {
       .filter((player) => !player.isBot)
       .map((player) => ({
         userId: player.id,
-        realName: player.name,
+        realName: player.realName,
         displayName: player.name,
-        gender: 'not-specified' as const,
+        gender: player.gender,
         declaredBio: player.bio || undefined
       }))
   }
@@ -234,33 +263,25 @@ export class GameService {
       .filter((player) => !player.isBot)
       .map((player) => ({
         userId: player.id,
-        realName: player.name,
+        realName: player.realName,
         displayName: player.name,
-        gender: 'not-specified' as const,
+        gender: player.gender,
         declaredBio: player.bio || undefined
       }))
   }
 
-  private buildUserMemorySnapshots(room: GameRoom): readonly UserMemorySnapshot[] {
-    return Array.from(room.players.values())
-      .filter((player) => !player.isBot)
-      .map((player) => ({
-        userId: player.id,
-        realName: player.name,
-        gender: 'not-specified' as const,
-        declaredBio: player.bio || undefined,
-        themes: [],
-        voterPreferences: {
-          darkPreference: 0.5,
-          callbackPreference: 0.5,
-          absurdPreference: 0.5,
-          ironyPreference: 0.5
-        },
-        authorStyle: {
-          avgPunchlineLength: 0,
-          preferredStructures: []
-        }
-      }))
+  private async buildUserMemorySnapshots(room: GameRoom): Promise<readonly UserMemorySnapshot[]> {
+    const humans = Array.from(room.players.values()).filter((player) => !player.isBot)
+    return Promise.all(
+      humans.map((player) =>
+        this.userMemoryService.buildSnapshot({
+          userId: player.id,
+          realName: player.realName,
+          gender: player.gender,
+          bio: player.bio || null
+        })
+      )
+    )
   }
 
   private async generateOpeningsForRound(room: GameRoom, roundNumber: number): Promise<void> {
@@ -332,9 +353,10 @@ export class GameService {
     let raw: readonly string[]
     if (!room.sessions.openingGenerator) {
       const players = this.buildOpeningPlayerProfiles(room)
-      const golden: readonly GoldenOpeningExample[] =
-        await this.promptStarterService.getGoldenExamplesDetailed(10)
-      const negative: readonly NegativeOpeningExample[] = []
+      const [golden, negative] = await Promise.all([
+        this.promptStarterService.getGoldenExamplesDetailed(10),
+        this.promptStarterService.getNegativeOpeningExamples(5) as Promise<readonly NegativeOpeningExample[]>
+      ])
       const result = await this.openingGeneratorAgent.startForRoom(room.code, {
         players,
         golden,
@@ -491,7 +513,7 @@ export class GameService {
 
   private createBot(room: GameRoom): void {
     const botCount = Array.from(room.players.values()).filter((player) => player.isBot).length
-    const bot = createPlayer({ name: `AI Bot ${botCount + 1}`, socketId: null, isBot: true })
+    const bot = createBotPlayer({ botNumber: botCount + 1 })
     room.players.set(bot.id, bot)
   }
 
@@ -844,6 +866,34 @@ export class GameService {
     this.setRoomTimer(room, RATING_PHASE_SECONDS, () => this.finishRatingPhase(room.code))
   }
 
+  public submitOpeningFeedback(input: {
+    readonly roomCode: string
+    readonly playerId: string
+    readonly items: readonly { readonly promptIndex: number; readonly verdict: 'up' | 'down' | 'broken' }[]
+  }): void {
+    const room = this.getRoomOrFail(input.roomCode)
+    if (room.phase !== 'writing') {
+      return
+    }
+    const player = this.getPlayerOrFail(room, input.playerId)
+    if (player.isBot) {
+      return
+    }
+    for (const item of input.items) {
+      const promptText = room.prompts[item.promptIndex]
+      if (!promptText) {
+        continue
+      }
+      void this.promptStarterService
+        .applyQuickFeedback({ promptText, verdict: item.verdict })
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `opening_feedback_failed room=${room.code} prompt="${promptText.slice(0, 60)}" verdict=${item.verdict} error=${error instanceof Error ? error.message : String(error)}`
+          )
+        })
+    }
+  }
+
   public submitRatings(input: {
     readonly roomCode: string
     readonly playerId: string
@@ -904,6 +954,13 @@ export class GameService {
     this.logger.log(
       `memory_updater_round room=${room.code} round=${room.roundIndex} users_updated=${Object.keys(updates.updates).length}`
     )
+    try {
+      await this.userMemoryService.applyUpdates(updates)
+    } catch (error: unknown) {
+      this.logger.warn(
+        `memory_updater_persist_failed room=${room.code} round=${room.roundIndex} error=${error instanceof Error ? error.message : String(error)}`
+      )
+    }
   }
 
   private buildRoundStats(room: GameRoom): RoundStats {

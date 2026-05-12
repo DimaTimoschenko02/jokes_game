@@ -18,11 +18,13 @@
   "dependencies": {
     "@nestjs/common": "^11.1.17",
     "@nestjs/core": "^11.1.17",
+    "@nestjs/jwt": "^11.0.2",
     "@nestjs/platform-express": "^11.1.17",
     "@nestjs/platform-socket.io": "^11.1.17",
     "@nestjs/serve-static": "^5.0.4",
     "@nestjs/websockets": "^11.1.17",
     "@types/cross-spawn": "^6.0.6",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "cross-spawn": "^7.0.6",
@@ -35,6 +37,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.6",
     "@types/node": "^25.5.0",
     "drizzle-kit": "^0.31.10",
     "socket.io-client": "^4.8.3",

@@ -19,15 +19,39 @@ export const normalizeName = (name: string): string =>
 export const normalizeAnswer = (value: string): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, ANSWER_MAX_LENGTH)
 
-export const createPlayer = (input: { readonly name: string; readonly socketId: string | null; readonly isBot: boolean; readonly bio?: string }): Player => ({
-  id: createId(),
+export const createHumanPlayer = (input: {
+  readonly userId: string
+  readonly socketId: string | null
+  readonly displayName: string
+  readonly realName: string
+  readonly bio: string | null
+  readonly gender: 'male' | 'female' | 'non-binary' | 'not-specified'
+}): Player => ({
+  id: input.userId,
   socketId: input.socketId,
-  isBot: input.isBot,
-  name: normalizeName(input.name),
+  isBot: false,
+  name: normalizeName(input.displayName),
+  realName: normalizeName(input.realName),
   bio: input.bio?.slice(0, 200) ?? '',
+  gender: input.gender,
   connected: true,
   score: 0
 })
+
+export const createBotPlayer = (input: { readonly botNumber: number }): Player => {
+  const label: string = `AI Bot ${input.botNumber}`
+  return {
+    id: createId(),
+    socketId: null,
+    isBot: true,
+    name: label,
+    realName: label,
+    bio: '',
+    gender: 'not-specified',
+    connected: true,
+    score: 0
+  }
+}
 
 export const buildPlayerContext = (players: Map<string, Player>): string => {
   const lines: string[] = []

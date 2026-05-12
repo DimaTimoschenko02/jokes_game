@@ -240,6 +240,50 @@ export class PromptStarterRepository {
     return rows[0]?.value ?? 0
   }
 
+  public async applyQuickFeedback(text: string, verdict: 'up' | 'down' | 'broken'): Promise<void> {
+    const upDelta: number = verdict === 'up' ? 1 : 0
+    const downDelta: number = verdict === 'down' ? 1 : 0
+    const brokenDelta: number = verdict === 'broken' ? 1 : 0
+    await this.db
+      .update(promptStarters)
+      .set({
+        quickFeedbackUp: sql`${promptStarters.quickFeedbackUp} + ${upDelta}`,
+        quickFeedbackDown: sql`${promptStarters.quickFeedbackDown} + ${downDelta}`,
+        quickFeedbackBroken: sql`${promptStarters.quickFeedbackBroken} + ${brokenDelta}`,
+        feedbackScore: sql`CASE
+          WHEN ${promptStarters.quickFeedbackUp} + ${upDelta} + ${promptStarters.quickFeedbackDown} + ${downDelta} + ${promptStarters.quickFeedbackBroken} + ${brokenDelta} = 0
+          THEN 0
+          ELSE ((${promptStarters.quickFeedbackUp} + ${upDelta})::real - (${promptStarters.quickFeedbackDown} + ${downDelta}) - (${promptStarters.quickFeedbackBroken} + ${brokenDelta})) / (${promptStarters.quickFeedbackUp} + ${upDelta} + ${promptStarters.quickFeedbackDown} + ${downDelta} + ${promptStarters.quickFeedbackBroken} + ${brokenDelta})
+        END`
+      })
+      .where(eq(promptStarters.text, text))
+  }
+
+  public async findLowRatedOpenings(input: {
+    readonly limit: number
+    readonly maxFeedbackScore: number
+    readonly maxAdminScore: number
+  }): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
+    const rows = await this.db
+      .select({
+        text: promptStarters.text,
+        feedbackScore: promptStarters.feedbackScore,
+        adminScore: promptStarters.adminScore,
+        adminComment: promptStarters.adminComment
+      })
+      .from(promptStarters)
+      .where(
+        sql`(${promptStarters.feedbackScore} <= ${input.maxFeedbackScore} AND (${promptStarters.quickFeedbackUp} + ${promptStarters.quickFeedbackDown} + ${promptStarters.quickFeedbackBroken}) >= 3) OR (${promptStarters.adminScore} <= ${input.maxAdminScore})`
+      )
+      .orderBy(asc(promptStarters.feedbackScore), asc(promptStarters.adminScore))
+      .limit(input.limit)
+    return rows.map((row) => ({
+      text: row.text,
+      score: row.adminScore ?? row.feedbackScore,
+      adminComment: row.adminComment ?? undefined
+    }))
+  }
+
   public async findMaxSimilarityToHistory(embedding: readonly number[]): Promise<number> {
     if (embedding.length === 0) {
       return 0
