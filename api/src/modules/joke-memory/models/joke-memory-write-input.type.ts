@@ -8,9 +8,12 @@ export type JokeMemoryWriteInput = {
   readonly voteShare: number
   readonly qualityScore: number
   readonly ratingAverage?: number
+  readonly ratingSum?: number
   readonly ratingCount?: number
   readonly promptEmbedding?: readonly number[]
   readonly embeddingModel?: string
+  readonly authorUserId?: string
+  readonly authorRealName?: string
   readonly source: JokeMemorySource
   readonly roomCode: string
   readonly roundIndex: number

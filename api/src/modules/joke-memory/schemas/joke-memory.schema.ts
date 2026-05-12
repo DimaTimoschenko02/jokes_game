@@ -38,7 +38,34 @@ export class JokeMemoryDocumentModel {
   public ratingAverage?: number
 
   @Prop({ required: false, min: 0 })
+  public ratingSum?: number
+
+  @Prop({ required: false, min: 0 })
   public ratingCount?: number
+
+  @Prop({ required: false, min: 1, max: 10 })
+  public adminScore?: number
+
+  @Prop({ required: false, maxlength: 80 })
+  public adminScoredBy?: string
+
+  @Prop({ required: false })
+  public adminScoredAt?: Date
+
+  @Prop({ required: false, maxlength: 500 })
+  public adminComment?: string
+
+  @Prop({ required: true, default: 0, min: 0 })
+  public usedAsExampleCount!: number
+
+  @Prop({ required: false })
+  public lastUsedAsExampleAt?: Date
+
+  @Prop({ required: false, maxlength: 64 })
+  public authorUserId?: string
+
+  @Prop({ required: false, maxlength: 80 })
+  public authorRealName?: string
 
   @Prop({ required: true, type: String, enum: ['human', 'bot'] })
   public source!: JokeMemorySource
@@ -62,3 +89,6 @@ JokeMemorySchema.index({ qualityScore: -1, createdAt: -1 })
 JokeMemorySchema.index({ voteShare: -1, createdAt: -1 })
 JokeMemorySchema.index({ fingerprint: 1, createdAt: -1 })
 JokeMemorySchema.index({ createdAt: -1 })
+JokeMemorySchema.index({ adminScore: -1 })
+JokeMemorySchema.index({ ratingAverage: -1, ratingCount: -1 })
+JokeMemorySchema.index({ authorUserId: 1, createdAt: -1 })

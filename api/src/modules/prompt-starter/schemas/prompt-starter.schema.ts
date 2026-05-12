@@ -36,6 +36,22 @@ export class CompletionSubdocument {
 
 export const CompletionSubdocumentSchema = SchemaFactory.createForClass(CompletionSubdocument)
 
+@Schema({ _id: false })
+export class UserQuickFeedbackSubdocument {
+  @Prop({ required: true, default: 0, min: 0 })
+  public up!: number
+
+  @Prop({ required: true, default: 0, min: 0 })
+  public down!: number
+
+  @Prop({ required: true, default: 0, min: 0 })
+  public broken!: number
+}
+
+export const UserQuickFeedbackSubdocumentSchema = SchemaFactory.createForClass(
+  UserQuickFeedbackSubdocument
+)
+
 @Schema({ collection: 'prompt_starters', timestamps: { createdAt: true, updatedAt: false } })
 export class PromptStarterDocumentModel {
   @Prop({ required: true, maxlength: 200, unique: true })
@@ -59,6 +75,39 @@ export class PromptStarterDocumentModel {
   @Prop({ required: false })
   public goldenSince?: Date
 
+  @Prop({ type: UserQuickFeedbackSubdocumentSchema, default: () => ({ up: 0, down: 0, broken: 0 }) })
+  public userQuickFeedback!: UserQuickFeedbackSubdocument
+
+  @Prop({ required: true, default: 0, min: -1, max: 1 })
+  public feedbackScore!: number
+
+  @Prop({ required: false, min: 1, max: 5 })
+  public adminScore?: number
+
+  @Prop({ required: false, maxlength: 80 })
+  public adminScoredBy?: string
+
+  @Prop({ required: false })
+  public adminScoredAt?: Date
+
+  @Prop({ required: false, maxlength: 500 })
+  public adminComment?: string
+
+  @Prop({ required: false, min: 0, max: 1 })
+  public derivedScore?: number
+
+  @Prop({ required: true, default: 0, min: 0 })
+  public usedAsExampleCount!: number
+
+  @Prop({ required: false })
+  public lastUsedAsExampleAt?: Date
+
+  @Prop({ required: false, type: [Number] })
+  public textEmbedding?: number[]
+
+  @Prop({ required: false, maxlength: 80 })
+  public embeddingModel?: string
+
   @Prop({ required: true, default: Date.now })
   public createdAt!: Date
 }
@@ -70,3 +119,7 @@ export const PromptStarterSchema = SchemaFactory.createForClass(PromptStarterDoc
 PromptStarterSchema.index({ usedCount: 1 })
 PromptStarterSchema.index({ 'completions.voteShare': -1 })
 PromptStarterSchema.index({ isGolden: 1, averageCompletionRating: -1 })
+PromptStarterSchema.index({ adminScore: -1, createdAt: -1 })
+PromptStarterSchema.index({ feedbackScore: -1 })
+PromptStarterSchema.index({ derivedScore: -1 })
+PromptStarterSchema.index({ usedAsExampleCount: 1 })

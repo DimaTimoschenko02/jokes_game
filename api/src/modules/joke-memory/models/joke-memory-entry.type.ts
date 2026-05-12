@@ -12,7 +12,16 @@ export type JokeMemoryEntry = {
   readonly voteShare: number
   readonly qualityScore: number
   readonly ratingAverage?: number
+  readonly ratingSum?: number
   readonly ratingCount?: number
+  readonly adminScore?: number
+  readonly adminScoredBy?: string
+  readonly adminScoredAt?: Date
+  readonly adminComment?: string
+  readonly usedAsExampleCount: number
+  readonly lastUsedAsExampleAt?: Date
+  readonly authorUserId?: string
+  readonly authorRealName?: string
   readonly source: JokeMemorySource
   readonly roomCode: string
   readonly roundIndex: number
