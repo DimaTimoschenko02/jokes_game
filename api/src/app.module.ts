@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose'
 import { ServeStaticModule } from '@nestjs/serve-static'
 import { join } from 'path'
 import { AdminModule } from './modules/admin/admin.module'
+import { AgentsModule } from './modules/agents/agents.module'
 import { AiModule } from './modules/ai/ai.module'
 import { ClaudeAgentModule } from './modules/claude-agent/claude-agent.module'
 import { GameModule } from './modules/game/game.module'
@@ -20,6 +21,7 @@ const MONGO_URI: string = process.env.MONGO_URI ?? 'mongodb://localhost:27017/pu
       serveStaticOptions: { index: ['index.html'] }
     }),
     ClaudeAgentModule,
+    AgentsModule,
     JokeMemoryModule,
     AiModule,
     PromptStarterModule,
