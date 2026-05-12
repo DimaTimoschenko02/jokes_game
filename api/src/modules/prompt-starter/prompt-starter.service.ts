@@ -53,6 +53,16 @@ export class PromptStarterService implements OnModuleInit {
     return entries.map((entry) => entry.text)
   }
 
+  public async getGoldenExamplesDetailed(
+    limit: number
+  ): Promise<readonly { readonly text: string; readonly score: number }[]> {
+    const entries = await this.repository.findGolden(limit)
+    return entries.map((entry) => ({
+      text: entry.text,
+      score: entry.averageCompletionRating ?? 0
+    }))
+  }
+
   public async getCompletionsForPrompt(promptText: string): Promise<readonly import('./models/prompt-starter-entry.type').PromptCompletion[]> {
     return this.repository.findBestCompletions({ promptText, limit: 20, minVoteShare: 0 })
   }

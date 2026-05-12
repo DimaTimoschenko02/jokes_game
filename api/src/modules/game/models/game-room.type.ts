@@ -1,8 +1,22 @@
+import { AgentSession } from '../../claude-agent/models/agent-session.type'
+import { MemoryUpdaterOutput } from '../../agents/memory-updater/models/user-memory-delta.type'
+import { UserMemorySnapshot } from '../../agents/memory-updater/models/user-memory-snapshot.type'
 import { Duel } from './duel.type'
 import { GamePhase } from './game-phase.type'
 import { Player } from './player.type'
 import { RatingItem } from './rating-item.type'
 import { Submission } from './submission.type'
+
+export type BotSessionEntry = {
+  readonly session: AgentSession<never>
+  readonly personalityName: string
+}
+
+export type GameRoomSessions = {
+  openingGenerator: AgentSession<readonly string[]> | null
+  botSessions: Map<string, BotSessionEntry>
+  memoryUpdater: AgentSession<MemoryUpdaterOutput> | null
+}
 
 export type GameRoom = {
   readonly code: string
@@ -27,4 +41,8 @@ export type GameRoom = {
   isStarting: boolean
   prefetchOpeningsPromise: Promise<readonly string[]> | null
   aiStatus: 'idle' | 'generating' | 'ready'
+  sessions: GameRoomSessions
+  userMemorySnapshots: readonly UserMemorySnapshot[]
+  memoryDeltasLog: MemoryUpdaterOutput[]
+  memoryUpdaterInFlight: Promise<void> | null
 }

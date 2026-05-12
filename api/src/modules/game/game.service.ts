@@ -1,5 +1,19 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
+import { BotAgentService, BotFewShotExample, BotPlayerProfile } from '../agents/bot/bot-agent.service'
+import { MemoryUpdaterAgentService } from '../agents/memory-updater/memory-updater-agent.service'
+import { MemoryUpdaterOutput } from '../agents/memory-updater/models/user-memory-delta.type'
+import { UserMemorySnapshot } from '../agents/memory-updater/models/user-memory-snapshot.type'
+import { RoundDuelStat, RoundJokeStat, RoundStats } from '../agents/memory-updater/models/round-stats.type'
+import {
+  GoldenOpeningExample,
+  NegativeOpeningExample,
+  OpeningGeneratorAgentService,
+  OpeningPlayerProfile
+} from '../agents/opening-generator/opening-generator-agent.service'
+import { OpeningSelectionService } from '../agents/opening-selection/opening-selection.service'
 import { AiService, BOT_FALLBACK_MARKER } from '../ai/ai.service'
+import { ClaudeAgentRunnerService } from '../claude-agent/claude-agent-runner.service'
+import { AgentSession } from '../claude-agent/models/agent-session.type'
 import { JokeMemoryService } from '../joke-memory/joke-memory.service'
 import { PromptStarterService } from '../prompt-starter/prompt-starter.service'
 import {
@@ -16,7 +30,7 @@ import {
 import { ClientDuel } from './models/client-duel.type'
 import { ClientGameState } from './models/client-game-state.type'
 import { ClientPlayer } from './models/client-player.type'
-import { GameRoom } from './models/game-room.type'
+import { GameRoom, GameRoomSessions } from './models/game-room.type'
 import { PlayerSession } from './models/player-session.type'
 import { SocketPlayerLink } from './models/socket-player-link.type'
 import {
@@ -50,8 +64,21 @@ export class GameService {
   public constructor(
     private readonly aiService: AiService,
     private readonly jokeMemoryService: JokeMemoryService,
-    private readonly promptStarterService: PromptStarterService
+    private readonly promptStarterService: PromptStarterService,
+    private readonly botAgent: BotAgentService,
+    private readonly openingGeneratorAgent: OpeningGeneratorAgentService,
+    private readonly openingSelection: OpeningSelectionService,
+    private readonly memoryUpdaterAgent: MemoryUpdaterAgentService,
+    private readonly claudeRunner: ClaudeAgentRunnerService
   ) {}
+
+  private createEmptySessions(): GameRoomSessions {
+    return {
+      openingGenerator: null,
+      botSessions: new Map(),
+      memoryUpdater: null
+    }
+  }
 
   public setBroadcast(fn: BroadcastFn): void {
     this.broadcastState = fn
@@ -88,7 +115,11 @@ export class GameService {
       isStarting: false,
       timerHandle: null,
       prefetchOpeningsPromise: null,
-      aiStatus: 'idle'
+      aiStatus: 'idle',
+      sessions: this.createEmptySessions(),
+      userMemorySnapshots: [],
+      memoryDeltasLog: [],
+      memoryUpdaterInFlight: null
     }
     this.createBots(room)
     this.rooms.set(roomCode, room)
@@ -154,11 +185,82 @@ export class GameService {
       if (room.prefetchOpeningsPromise) {
         await room.prefetchOpeningsPromise.catch(() => undefined)
       }
+      room.userMemorySnapshots = this.buildUserMemorySnapshots(room)
+      await this.prewarmBotSessions(room)
       await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
     } finally {
       room.isStarting = false
     }
+  }
+
+  private async prewarmBotSessions(room: GameRoom): Promise<void> {
+    const botPlayers = Array.from(room.players.values()).filter((player) => player.isBot)
+    if (botPlayers.length === 0) {
+      return
+    }
+    const profiles = this.buildBotPlayerProfiles(room)
+    await Promise.all(
+      botPlayers.map(async (bot) => {
+        try {
+          const result = await this.botAgent.startForBot(room.code, bot.id, profiles)
+          room.sessions.botSessions.set(bot.id, {
+            session: result.session,
+            personalityName: result.personalityName
+          })
+        } catch (error: unknown) {
+          this.logger.warn(
+            `bot_session_start_failed room=${room.code} bot=${bot.id} error=${error instanceof Error ? error.message : String(error)}`
+          )
+        }
+      })
+    )
+  }
+
+  private buildOpeningPlayerProfiles(room: GameRoom): readonly OpeningPlayerProfile[] {
+    return Array.from(room.players.values())
+      .filter((player) => !player.isBot)
+      .map((player) => ({
+        userId: player.id,
+        realName: player.name,
+        displayName: player.name,
+        gender: 'not-specified' as const,
+        declaredBio: player.bio || undefined
+      }))
+  }
+
+  private buildBotPlayerProfiles(room: GameRoom): readonly BotPlayerProfile[] {
+    return Array.from(room.players.values())
+      .filter((player) => !player.isBot)
+      .map((player) => ({
+        userId: player.id,
+        realName: player.name,
+        displayName: player.name,
+        gender: 'not-specified' as const,
+        declaredBio: player.bio || undefined
+      }))
+  }
+
+  private buildUserMemorySnapshots(room: GameRoom): readonly UserMemorySnapshot[] {
+    return Array.from(room.players.values())
+      .filter((player) => !player.isBot)
+      .map((player) => ({
+        userId: player.id,
+        realName: player.name,
+        gender: 'not-specified' as const,
+        declaredBio: player.bio || undefined,
+        themes: [],
+        voterPreferences: {
+          darkPreference: 0.5,
+          callbackPreference: 0.5,
+          absurdPreference: 0.5,
+          ironyPreference: 0.5
+        },
+        authorStyle: {
+          avgPunchlineLength: 0,
+          preferredStructures: []
+        }
+      }))
   }
 
   private async generateOpeningsForRound(room: GameRoom, roundNumber: number): Promise<void> {
@@ -168,12 +270,35 @@ export class GameService {
     if (room.allOpenings.length >= offset + needed) {
       return
     }
+
+    const canUseAgent: boolean = room.isStarting || room.phase !== 'lobby'
+    if (canUseAgent) {
+      const agentStart = Date.now()
+      try {
+        const viaAgent = await this.generateOpeningsViaAgent(room, needed)
+        if (viaAgent.length >= needed) {
+          room.allOpenings.push(...viaAgent.slice(0, needed))
+          this.logger.log(
+            `generate_round_openings_via_agent room=${room.code} round=${roundNumber} count=${viaAgent.length} elapsed_ms=${Date.now() - agentStart}`
+          )
+          return
+        }
+        this.logger.warn(
+          `generate_round_openings_agent_short room=${room.code} round=${roundNumber} got=${viaAgent.length} needed=${needed} falling_back_legacy`
+        )
+      } catch (error: unknown) {
+        this.logger.warn(
+          `generate_round_openings_agent_failed room=${room.code} round=${roundNumber} error=${error instanceof Error ? error.message : String(error)} falling_back_legacy`
+        )
+      }
+    }
+
     const playerNames = this.getHumanPlayerNames(room)
     const playerContext = buildPlayerContext(room.players)
     const goldenExamples = await this.promptStarterService.getGoldenExamples(10)
 
     const startMs = Date.now()
-    this.logger.log(`generate_round_openings room=${room.code} round=${roundNumber} needed=${needed} already=${room.allOpenings.length} golden_examples=${goldenExamples.length}`)
+    this.logger.log(`generate_round_openings_legacy room=${room.code} round=${roundNumber} needed=${needed} already=${room.allOpenings.length} golden_examples=${goldenExamples.length}`)
 
     const openings = await this.aiService.generateAllOpenings({
       needed,
@@ -198,6 +323,64 @@ export class GameService {
     })
     room.allOpenings.push(...openings, ...fallbackPrompts)
     this.logger.log(`generate_round_openings_with_fallback room=${room.code} round=${roundNumber} ai=${openings.length} db=${fallbackPrompts.length} elapsed_ms=${elapsedMs}`)
+  }
+
+  private async generateOpeningsViaAgent(
+    room: GameRoom,
+    needed: number
+  ): Promise<readonly string[]> {
+    let raw: readonly string[]
+    if (!room.sessions.openingGenerator) {
+      const players = this.buildOpeningPlayerProfiles(room)
+      const golden: readonly GoldenOpeningExample[] =
+        await this.promptStarterService.getGoldenExamplesDetailed(10)
+      const negative: readonly NegativeOpeningExample[] = []
+      const result = await this.openingGeneratorAgent.startForRoom(room.code, {
+        players,
+        golden,
+        negative,
+        needed
+      })
+      room.sessions.openingGenerator = result.session
+      raw = result.initialOpenings
+    } else {
+      raw = await this.openingGeneratorAgent.generateMore(room.sessions.openingGenerator, {
+        needed,
+        previousRoundResults: [],
+        excludedOpenings: room.allOpenings
+      })
+    }
+
+    if (raw.length === 0) {
+      return []
+    }
+
+    const filter = await this.openingSelection.filterByHistorySimilarity(raw)
+    const accepted = [...filter.accepted]
+
+    if (accepted.length < needed && room.sessions.openingGenerator) {
+      try {
+        const more = await this.openingGeneratorAgent.generateMore(room.sessions.openingGenerator, {
+          needed,
+          previousRoundResults: [],
+          excludedOpenings: [
+            ...room.allOpenings,
+            ...accepted.map((a) => a.text),
+            ...filter.rejectedAsDuplicates
+          ]
+        })
+        const filterMore = await this.openingSelection.filterByHistorySimilarity(more)
+        accepted.push(...filterMore.accepted)
+      } catch (error: unknown) {
+        this.logger.warn(
+          `opening_agent_retry_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`
+        )
+      }
+    }
+
+    const diverse = this.openingSelection.selectDiverse(accepted, needed)
+    void this.openingSelection.registerSelected(diverse).catch(() => undefined)
+    return diverse.map((opening) => opening.text)
   }
 
   private prefetchNextRoundOpenings(room: GameRoom): void {
@@ -481,8 +664,8 @@ export class GameService {
     const playerNames = this.getHumanPlayerNames(room)
     const playerContext = buildPlayerContext(room.players)
     const answers: [string, string] = [
-      await this.generateSafeBotAnswer(promptOne, playerNames, playerContext),
-      await this.generateSafeBotAnswer(promptTwo, playerNames, playerContext)
+      await this.generateSafeBotAnswer(room, playerId, promptOne, playerNames, playerContext),
+      await this.generateSafeBotAnswer(room, playerId, promptTwo, playerNames, playerContext)
     ]
     if (room.phase !== 'writing') {
       return
@@ -494,7 +677,26 @@ export class GameService {
     }
   }
 
-  private async generateSafeBotAnswer(prompt: string, playerNames: readonly string[], playerContext: string): Promise<string> {
+  private async generateSafeBotAnswer(
+    room: GameRoom,
+    botId: string,
+    prompt: string,
+    playerNames: readonly string[],
+    playerContext: string
+  ): Promise<string> {
+    const session = room.sessions.botSessions.get(botId)?.session
+    if (session) {
+      try {
+        const punchline = await this.generatePunchlineViaAgent(session, prompt)
+        if (punchline) {
+          return normalizeAnswer(punchline)
+        }
+      } catch (error: unknown) {
+        this.logger.warn(
+          `bot_agent_punchline_failed room=${room.code} bot=${botId} error=${error instanceof Error ? error.message : String(error)} falling_back_legacy`
+        )
+      }
+    }
     const timeoutPromise = new Promise<string>((resolve) => {
       setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 60_000)
     })
@@ -502,6 +704,31 @@ export class GameService {
       .generateBotAnswer({ prompt, playerNames, playerContext })
       .then((value) => normalizeAnswer(value))
     return Promise.race([aiPromise, timeoutPromise]).catch(() => LOCAL_FALLBACK_ANSWER)
+  }
+
+  private async generatePunchlineViaAgent(
+    session: AgentSession<never>,
+    prompt: string
+  ): Promise<string | null> {
+    const examples = await this.jokeMemoryService.executeRetrieveBotExamples({ prompt })
+    const positive: readonly BotFewShotExample[] = examples.positive.map((entry) => ({
+      opening: entry.prompt,
+      punchline: entry.punchline,
+      score: entry.useScore,
+      adminComment: entry.adminComment
+    }))
+    const negative: readonly BotFewShotExample[] = examples.negative.map((entry) => ({
+      opening: entry.prompt,
+      punchline: entry.punchline,
+      score: entry.useScore,
+      adminComment: entry.adminComment
+    }))
+    const result = await this.botAgent.generatePunchline(session, {
+      opening: prompt,
+      positiveExamples: positive,
+      negativeExamples: negative
+    })
+    return result || null
   }
 
   private upsertSubmission(room: GameRoom, playerId: string, answers: [string, string]): void {
@@ -644,7 +871,139 @@ export class GameService {
     }
     this.clearRoomTimer(room)
     this.persistRoundRatings(room)
+    const updaterPromise: Promise<void> = this.runMemoryUpdater(room)
+      .catch((error: unknown) => {
+        this.logger.warn(
+          `memory_updater_failed room=${room.code} round=${room.roundIndex} error=${error instanceof Error ? error.message : String(error)}`
+        )
+      })
+      .finally(() => {
+        if (room.memoryUpdaterInFlight === updaterPromise) {
+          room.memoryUpdaterInFlight = null
+        }
+      })
+    room.memoryUpdaterInFlight = updaterPromise
     this.startScoreboardPhase(room)
+  }
+
+  private async runMemoryUpdater(room: GameRoom): Promise<void> {
+    const stats: RoundStats = this.buildRoundStats(room)
+    let updates: MemoryUpdaterOutput
+    if (!room.sessions.memoryUpdater) {
+      const result = await this.memoryUpdaterAgent.startAfterRoundOne(
+        room.code,
+        room.userMemorySnapshots,
+        stats
+      )
+      room.sessions.memoryUpdater = result.session
+      updates = result.firstRoundUpdates
+    } else {
+      updates = await this.memoryUpdaterAgent.updateAfterRound(room.sessions.memoryUpdater, stats)
+    }
+    room.memoryDeltasLog.push(updates)
+    this.logger.log(
+      `memory_updater_round room=${room.code} round=${room.roundIndex} users_updated=${Object.keys(updates.updates).length}`
+    )
+  }
+
+  private buildRoundStats(room: GameRoom): RoundStats {
+    return {
+      roundIndex: room.roundIndex,
+      jokes: this.buildRoundJokeStats(room),
+      duels: this.buildRoundDuelStats(room)
+    }
+  }
+
+  private buildRoundJokeStats(room: GameRoom): readonly RoundJokeStat[] {
+    const ratingsByItem = this.aggregateRatings(room)
+    const result: RoundJokeStat[] = []
+    for (const item of room.ratingItems) {
+      if (!item.prompt || !item.punchline) {
+        continue
+      }
+      const author = room.players.get(item.authorPlayerId)
+      if (!author) {
+        continue
+      }
+      const stats = ratingsByItem.get(item.id)
+      result.push({
+        opening: item.prompt,
+        punchline: item.punchline,
+        authorUserId: author.isBot ? null : author.id,
+        authorRealName: author.name,
+        ratingAverage: stats?.average ?? null,
+        ratingCount: stats?.count ?? 0
+      })
+    }
+    return result
+  }
+
+  private buildRoundDuelStats(room: GameRoom): readonly RoundDuelStat[] {
+    const result: RoundDuelStat[] = []
+    for (const duel of room.duels) {
+      if (!duel.closed) {
+        continue
+      }
+      const leftPlayer = room.players.get(duel.leftPlayerId)
+      const rightPlayer = room.players.get(duel.rightPlayerId)
+      if (!leftPlayer || !rightPlayer) {
+        continue
+      }
+      const leftSubmission = room.submissions.get(duel.leftPlayerId)
+      const rightSubmission = room.submissions.get(duel.rightPlayerId)
+      if (!leftSubmission || !rightSubmission) {
+        continue
+      }
+      const leftAnswer = getAnswerForPromptIndex(leftSubmission, duel.promptIndex)
+      const rightAnswer = getAnswerForPromptIndex(rightSubmission, duel.promptIndex)
+      const leftVotes = this.countVotes(duel.votes, 'left')
+      const rightVotes = this.countVotes(duel.votes, 'right')
+      const leftWon: boolean = leftVotes >= rightVotes
+      const winner = leftWon ? leftPlayer : rightPlayer
+      const voters: string[] = []
+      duel.votes.forEach((_, voterId) => {
+        const player = room.players.get(voterId)
+        if (player && !player.isBot) {
+          voters.push(voterId)
+        }
+      })
+      result.push({
+        opening: room.prompts[duel.promptIndex] ?? '',
+        winnerUserId: winner.isBot ? null : winner.id,
+        winnerPunchline: leftWon ? leftAnswer : rightAnswer,
+        loserPunchline: leftWon ? rightAnswer : leftAnswer,
+        votesFor: leftWon ? leftVotes : rightVotes,
+        votesAgainst: leftWon ? rightVotes : leftVotes,
+        votersUserIds: voters
+      })
+    }
+    return result
+  }
+
+  private async cleanupSessions(room: GameRoom): Promise<void> {
+    if (room.memoryUpdaterInFlight) {
+      await room.memoryUpdaterInFlight.catch(() => undefined)
+    }
+    const sessions: AgentSession<unknown>[] = []
+    if (room.sessions.openingGenerator) {
+      sessions.push(room.sessions.openingGenerator)
+    }
+    if (room.sessions.memoryUpdater) {
+      sessions.push(room.sessions.memoryUpdater)
+    }
+    room.sessions.botSessions.forEach((entry) => {
+      sessions.push(entry.session)
+    })
+    await Promise.all(
+      sessions.map((session) =>
+        this.claudeRunner.end(session).catch((error: unknown) => {
+          this.logger.warn(
+            `session_end_failed session=${session.id} error=${error instanceof Error ? error.message : String(error)}`
+          )
+        })
+      )
+    )
+    room.sessions = this.createEmptySessions()
   }
 
   private startScoreboardPhase(room: GameRoom): void {
@@ -667,6 +1026,7 @@ export class GameService {
       this.logger.log(`game_finished room=${room.code} rounds=${room.roundCount} final_scores=[${totals}]`)
       this.emitRoomState(room.code)
       this.evaluateAndSaveGoldenOpenings(room)
+      void this.cleanupSessions(room)
       return
     }
     void this.startWritingPhase(room.code)
