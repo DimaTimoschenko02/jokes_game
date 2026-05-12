@@ -42,9 +42,23 @@ export class JokeMemoryService {
     }
     const votesFor = Math.max(0, Math.floor(input.votesFor))
     const votesAgainst = Math.max(0, Math.floor(input.votesAgainst))
-    const voteShare = this.calculateVoteShare(votesFor, votesAgainst)
     const ratingAverage = this.normalizeRatingAverage(input.ratingAverage)
     const ratingCount = this.normalizeRatingCount(input.ratingCount)
+    const ratingSum: number | null =
+      ratingAverage !== null && ratingCount !== null && ratingCount > 0
+        ? ratingAverage * ratingCount
+        : null
+    const existing = await this.jokeMemoryRepository.findByFingerprint(prompt, punchline)
+    if (existing) {
+      await this.jokeMemoryRepository.mergeCounters(String(existing._id), {
+        votesFor,
+        votesAgainst,
+        ratingSum: ratingSum ?? undefined,
+        ratingCount: ratingCount ?? undefined
+      })
+      return
+    }
+    const voteShare = this.calculateVoteShare(votesFor, votesAgainst)
     const qualityScore = this.calculateQualityScore(votesFor, votesAgainst, ratingAverage, ratingCount)
     const embedding = await this.embeddingService.executeEmbedText({ text: prompt })
     await this.jokeMemoryRepository.createEntry({
@@ -55,9 +69,12 @@ export class JokeMemoryService {
       voteShare,
       qualityScore,
       ratingAverage: ratingAverage ?? undefined,
+      ratingSum: ratingSum ?? undefined,
       ratingCount: ratingCount ?? undefined,
       promptEmbedding: embedding?.vector,
       embeddingModel: embedding?.model,
+      authorUserId: input.authorUserId,
+      authorRealName: input.authorRealName,
       source: input.source,
       roomCode: input.roomCode,
       roundIndex: input.roundIndex

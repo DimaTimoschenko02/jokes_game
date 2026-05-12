@@ -7,6 +7,8 @@ export type JokeMemoryRecordInput = {
   readonly votesAgainst: number
   readonly ratingAverage?: number
   readonly ratingCount?: number
+  readonly authorUserId?: string
+  readonly authorRealName?: string
   readonly source: JokeMemorySource
   readonly roomCode: string
   readonly roundIndex: number
