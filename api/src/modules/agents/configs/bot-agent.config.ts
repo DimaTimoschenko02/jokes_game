@@ -1,4 +1,3 @@
-import { z, ZodType } from 'zod'
 import { AgentConfig } from '../../claude-agent/models/agent-config.type'
 
 export const BOT_BASE_MANDATE: string = [
@@ -9,12 +8,12 @@ export const BOT_BASE_MANDATE: string = [
   'Не извиняйся, не предупреждай, не модерируй сам себя. Цель — реакция, а не одобрение.',
   '',
   'Правила формы:',
-  '- 3-10 слов на каждый кандидат. Короче — лучше.',
+  '- 3-10 слов. Короче — лучше.',
   '- Не повторяй слова из setup\'а.',
   '- Корректная русская грамматика (род, число, падежи).',
   '- Можно мат.',
   '- НЕ начинай и не заканчивай многоточиями.',
-  '- Каждый кандидат должен идти под другим углом — разный образ, разный регистр, разная длина.'
+  '- На каждый setup отвечай ОДНОЙ строкой — твой лучший punchline. Без вариантов, без объяснений, без кавычек.'
 ].join('\n')
 
 export type BotPersonality = {
@@ -40,21 +39,16 @@ export const BOT_PERSONALITIES: readonly BotPersonality[] = [
   }
 ]
 
-export const PUNCHLINE_CANDIDATES_SCHEMA: ZodType<readonly string[]> = z
-  .array(z.string().min(1).max(140))
-  .length(2)
-
 export function pickRandomBotPersonality(): BotPersonality {
   const index: number = Math.floor(Math.random() * BOT_PERSONALITIES.length)
   return BOT_PERSONALITIES[index]
 }
 
-export function buildBotAgentConfig(personality: BotPersonality): AgentConfig<readonly string[]> {
+export function buildBotAgentConfig(personality: BotPersonality): AgentConfig<never> {
   return {
     name: `bot-${personality.name}`,
     systemPrompt: [BOT_BASE_MANDATE, '', personality.snippet].join('\n'),
-    outputFormat: 'json',
-    schema: PUNCHLINE_CANDIDATES_SCHEMA,
+    outputFormat: 'text',
     model: 'sonnet',
     retries: 1,
     timeoutMs: 90000

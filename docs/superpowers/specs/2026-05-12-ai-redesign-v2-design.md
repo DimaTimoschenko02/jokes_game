@@ -107,7 +107,6 @@ gameRoom {
 
   // Claude session IDs
   openingGeneratorSessionId  string | null
-  judgeSessionId             string | null
   memoryUpdaterSessionId     string | null
   bots: [{ ...existing, sessionId: string | null }]
 
@@ -249,13 +248,13 @@ Competitive framing:
 5. **Penalty за переиспользование:** при ранжировании multiply на `1 / (1 + log(1 + usedAsExampleCount))`. Инкремент counter — **только после успешной генерации** (не сразу при retrieval).
 6. **Лимит 600 убираем**, пул — все записи. Pre-filter держит запрос быстрым.
 
-### 4.3 Two-stage generation (упрощённая, поверх сессии)
+### 4.3 Single-call generation (поверх сессии)
 
-**Stage 1 — generate:** 2 параллельных Claude-вызова в той же сессии бота, каждый возвращает **один** punchline-кандидат. Параллельность даёт разнообразие без раздутого single-call (5 кандидатов в одном ответе хуже декорелируются).
+**Один Claude-вызов на opening** в той же сессии бота — возвращает **один** punchline. Без Stage 2 judge'а: бот сам выбирает что выдать, а персональность из своего system prompt задаёт характер. Меньше latency, меньше cost, меньше точек отказа.
 
-**Stage 2 — judge:** 1 Claude-вызов в **отдельной judge-сессии** (одна на комнату, не на бота). Чистое разделение ролей — судья не размывает бот-персону. Получает на вход 2 кандидата + opening + минимальный контекст игроков, возвращает один winning punchline. Эта сессия тоже может жить через раунды (накапливает «вкус» комнаты), но это TBD — стартуем без resume, посмотрим как пойдёт.
+**Failure handling:** один retry внутри runner'а. Если опять упало — `[бот молчит]` маркер (Ч.4.5).
 
-**Failure handling Stage 2:** один retry. Если опять упало — берём первого кандидата без judge'а.
+**Judge для punchline'ов — отложен** (см. Часть 11). Если на playtest'ах одна шутка от бота окажется недостаточно хорошей — добавим Stage 2 как отдельный judge-агент.
 
 В few-shot примерах (positive и negative) — если у записи есть `adminComment`, он подаётся вместе с примером в формате:
 ```
@@ -443,6 +442,7 @@ useScore =
 5. **Audience-aware generation** — отложено, требует накопленный `voterPreferences`
 6. **Per-player targeted opening generation** — отложено, требует накопленный `confirmedFacts`
 7. **Opening judge как Stage 2** — отложено. Если внутренний выбор opening-generator модели + post-filter дают плохие openings (повторяемость / банальность / слабые pivot'ы) — добавляем отдельную judge-сессию на комнату с критериями: vivid scene, открытый pivot, 5+ возможных панчлайнов, оригинальность, персонализация. Триггер для добавления — субъективное «плохо» на playtests или метрика по `userQuickFeedback.down / up`
+8. **Punchline judge как Stage 2** — отложено. Сейчас бот делает один вызов = один punchline (Ч.4.3). Если одна шутка окажется слабой на playtest'ах — добавим judge-агента, который перед выдачей просит бота сгенерить 2 кандидата (через `--fork-session` чтобы избежать race на session.jsonl) и выбирает лучший. Триггер — низкий voteShare ботов на playtest'ах
 
 ---
 
@@ -452,7 +452,7 @@ useScore =
 
 Создание Claude-сессии — это вызов `claude -p "<system+initial user prompt>"`, который занимает несколько секунд (загрузка system prompt + initial context + первый ответ). Если делать lazy (при первом нужном panel'е), игрок ждёт лишние секунды на первый ход.
 
-**Prewarm:** на этапе `startGame` (между нажатием «Начать игру» и стартом 1-го раунда) параллельно создаём все нужные сессии (`openingGeneratorSessionId`, `bot[i].sessionId`, `judgeSessionId`, `memoryUpdaterSessionId`). К моменту когда раунд начнётся — все сессии готовы, последующие `--resume` дёшевы.
+**Prewarm:** на этапе `startGame` (между нажатием «Начать игру» и стартом 1-го раунда) параллельно создаём все нужные сессии (`openingGeneratorSessionId`, `bot[i].sessionId`, `memoryUpdaterSessionId`). К моменту когда раунд начнётся — все сессии готовы, последующие `--resume` дёшевы.
 
 Текущий паттерн `prefetchOpeningsPromise` уже делает это для openings — расширим на остальные сессии.
 
@@ -470,7 +470,7 @@ useScore =
 
 ### 13.1 Базовая абстракция
 
-Все Claude-сессии (opening generator, боты, judge, memory updater и любые будущие роли) проходят через **один runner** `ClaudeAgentRunner`. Он управляет lifecycle (`start` / `continue` / `end`), parsing (`text` / `json` с Zod), retry policy, логированием latency/tokens — то есть всё, что общее для всех ролей.
+Все Claude-сессии (opening generator, боты, memory updater и любые будущие роли — например punchline/opening judge когда понадобятся) проходят через **один runner** `ClaudeAgentRunner`. Он управляет lifecycle (`start` / `continue` / `end`), parsing (`text` / `json` с Zod), retry policy, логированием latency/tokens — то есть всё, что общее для всех ролей.
 
 ```ts
 @Injectable()
@@ -537,7 +537,6 @@ System prompts и prompt-templates живут в отдельной папке `
 ```ts
 type RoomAgents = {
   openingGenerator: AgentSession | null
-  judge: AgentSession | null
   memoryUpdater: AgentSession | null
   bots: Map<string, AgentSession>      // botId → session
 }

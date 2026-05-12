@@ -31,7 +31,7 @@ export type BotGenerateInput = {
 }
 
 export type BotStartResult = {
-  readonly session: AgentSession<readonly string[]>
+  readonly session: AgentSession<never>
   readonly personalityName: string
 }
 
@@ -49,37 +49,33 @@ export class BotAgentService {
     const personality: BotPersonality = pickRandomBotPersonality()
     const config = buildBotAgentConfig(personality)
     const initialPrompt: string = this.buildInitialPrompt(players)
-    const { session } = await this.runner.start<readonly string[]>(config, initialPrompt)
+    const { session } = await this.runner.start<never>(config, initialPrompt)
     this.logger.log(
       `bot_start room=${roomCode} bot=${botId} personality=${personality.name} session=${session.id}`
     )
     return { session, personalityName: personality.name }
   }
 
-  public async generateCandidates(
-    session: AgentSession<readonly string[]>,
+  public async generatePunchline(
+    session: AgentSession<never>,
     input: BotGenerateInput
-  ): Promise<readonly [string, string]> {
+  ): Promise<string> {
     const userPrompt: string = this.buildPunchlinePrompt(input)
-    const response = await this.runner.continue<readonly string[]>(session, userPrompt)
-    const candidates = response.parsed
-    if (!candidates || candidates.length < 2) {
-      throw new Error('Bot did not return 2 candidates')
-    }
-    return [candidates[0], candidates[1]] as const
+    const response = await this.runner.continue<never>(session, userPrompt)
+    return this.cleanPunchline(response.raw)
   }
 
   public async pushRoundDigest(
-    session: AgentSession<readonly string[]>,
+    session: AgentSession<never>,
     digestText: string
   ): Promise<void> {
     const ackPrompt: string = [
       digestText,
       '',
-      'Это статистика прошлого раунда. Изучи кратко и подтверди "понял" одним словом — JSON-массив из 2 элементов от тебя сейчас не нужен, ответ свободной формой.'
+      'Это статистика прошлого раунда. Изучи кратко и подтверди "понял" одним словом.'
     ].join('\n')
     try {
-      await this.runner.continue<readonly string[]>(session, ackPrompt)
+      await this.runner.continue<never>(session, ackPrompt)
     } catch (error) {
       this.logger.warn(`bot_digest_failed session=${session.id} reason="${(error as Error).message}"`)
     }
@@ -91,10 +87,9 @@ export class BotAgentService {
       'За этим столом сегодня играют:',
       ...profileLines,
       '',
-      'Это весь состав. Ниже я буду присылать setup\'ы шуток — пиши на каждый ровно 2 РАЗНЫХ punchline-кандидата (другой угол, другой образ, другая длина).',
-      'Каждый ответ — JSON-массив из 2 строк, без markdown fences, без лишнего текста.',
+      'Это весь состав. Ниже я буду присылать setup\'ы шуток — пиши на каждый ровно ОДНУ строку с твоим лучшим punchline. Без вариантов, без markdown, без кавычек, без объяснений.',
       '',
-      'Сейчас подтверди готовность: верни JSON ["готов", "готов"] и жди setup.'
+      'Сейчас подтверди готовность одним словом "готов" и жди setup.'
     ].join('\n')
   }
 
@@ -135,10 +130,14 @@ export class BotAgentService {
         lines.push(`- "${example.opening}" → "${example.punchline}"${commentSuffix}`)
       }
     }
-    lines.push(
-      '',
-      'Напиши 2 РАЗНЫХ punchline-кандидата. Ответ: JSON-массив строк ровно из 2 элементов. Без markdown, без объяснений.'
-    )
+    lines.push('', 'Ответ — одна строка с punchline. Без markdown, без кавычек, без объяснений.')
     return lines.join('\n')
+  }
+
+  private cleanPunchline(raw: string): string {
+    const trimmed: string = raw.trim()
+    const withoutQuotes: string = trimmed.replace(/^["«]+|["»]+$/g, '').trim()
+    const firstLine: string = withoutQuotes.split('\n')[0] ?? ''
+    return firstLine.trim()
   }
 }
