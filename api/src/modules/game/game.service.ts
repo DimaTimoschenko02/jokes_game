@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
-import { AiService, FALLBACK_PUNCHLINE_SET } from '../ai/ai.service'
+import { AiService, BOT_FALLBACK_MARKER } from '../ai/ai.service'
 import { JokeMemoryService } from '../joke-memory/joke-memory.service'
 import { PromptStarterService } from '../prompt-starter/prompt-starter.service'
 import {
@@ -33,11 +33,10 @@ import {
 
 type BroadcastFn = (roomCode: string) => void
 
-const BOT_STYLES: readonly string[] = ['sarcastic', 'chaotic', 'dark', 'absurd', 'bold'] as const
-const LOCAL_FALLBACK_ANSWER: string = 'это звучало лучше в моей голове.'
+const LOCAL_FALLBACK_ANSWER: string = '[NO_ANSWER]'
 
 const isFallbackPunchline = (punchline: string): boolean =>
-  FALLBACK_PUNCHLINE_SET.has(punchline) || punchline === LOCAL_FALLBACK_ANSWER
+  punchline === BOT_FALLBACK_MARKER || punchline === LOCAL_FALLBACK_ANSWER
 
 @Injectable()
 export class GameService {
@@ -495,20 +494,12 @@ export class GameService {
     }
   }
 
-  private getBotStyle(): string {
-    return BOT_STYLES[Math.floor(Math.random() * BOT_STYLES.length)]
-  }
-
-  private getRandomDarkness(): number {
-    return Math.floor(Math.random() * 10) + 1
-  }
-
   private async generateSafeBotAnswer(prompt: string, playerNames: readonly string[], playerContext: string): Promise<string> {
     const timeoutPromise = new Promise<string>((resolve) => {
       setTimeout(() => resolve(LOCAL_FALLBACK_ANSWER), 60_000)
     })
     const aiPromise = this.aiService
-      .generateBotAnswer({ prompt, styleTag: this.getBotStyle(), darknessLevel: this.getRandomDarkness(), playerNames, playerContext })
+      .generateBotAnswer({ prompt, playerNames, playerContext })
       .then((value) => normalizeAnswer(value))
     return Promise.race([aiPromise, timeoutPromise]).catch(() => LOCAL_FALLBACK_ANSWER)
   }

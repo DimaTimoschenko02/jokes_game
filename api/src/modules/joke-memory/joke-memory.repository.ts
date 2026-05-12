@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm'
 import { DATABASE } from '../../db/db.module'
 import { jokeMemory } from '../../db/schema/joke-memory.schema'
 import { Db } from '../../db/db.types'
+import { JokeMemoryCandidate } from './models/joke-memory-candidate.type'
 import { JokeMemoryEntry } from './models/joke-memory-entry.type'
 import { JokeMemoryWriteInput } from './models/joke-memory-write-input.type'
 
@@ -12,6 +13,14 @@ export type JokeMemoryCounterMerge = {
   readonly ratingSum?: number
   readonly ratingCount?: number
 }
+
+export type CandidateFilter = 'positive' | 'negative'
+
+const POSITIVE_ADMIN_SCORE_MIN: number = 7
+const NEGATIVE_ADMIN_SCORE_MAX: number = 3
+const POSITIVE_RATING_AVG_MIN: number = 7
+const NEGATIVE_RATING_AVG_MAX: number = 4
+const RATING_COUNT_MIN: number = 2
 
 @Injectable()
 export class JokeMemoryRepository {
@@ -86,6 +95,65 @@ export class JokeMemoryRepository {
       .where(eq(jokeMemory.id, documentId))
   }
 
+  public async findCandidatesForBot(input: {
+    readonly queryEmbedding: readonly number[]
+    readonly filter: CandidateFilter
+    readonly limit: number
+  }): Promise<readonly JokeMemoryCandidate[]> {
+    const queryVectorLiteral: string = this.toVectorLiteral(input.queryEmbedding)
+    const filterExpr = this.buildQualityFilter(input.filter)
+    const rows = await this.db
+      .select({
+        id: jokeMemory.id,
+        prompt: jokeMemory.prompt,
+        punchline: jokeMemory.punchline,
+        promptEmbedding: jokeMemory.promptEmbedding,
+        adminScore: jokeMemory.adminScore,
+        adminComment: jokeMemory.adminComment,
+        ratingAverage: jokeMemory.ratingAverage,
+        ratingCount: jokeMemory.ratingCount,
+        ratingSum: jokeMemory.ratingSum,
+        votesFor: jokeMemory.votesFor,
+        votesAgainst: jokeMemory.votesAgainst,
+        usedAsExampleCount: jokeMemory.usedAsExampleCount,
+        source: jokeMemory.source
+      })
+      .from(jokeMemory)
+      .where(and(isNotNull(jokeMemory.promptEmbedding), filterExpr))
+      .orderBy(sql`${jokeMemory.promptEmbedding} <=> ${queryVectorLiteral}::vector`)
+      .limit(input.limit)
+    return rows
+      .filter((row): row is typeof row & { promptEmbedding: number[] } => Array.isArray(row.promptEmbedding))
+      .map((row) => ({
+        id: row.id,
+        prompt: row.prompt,
+        punchline: row.punchline,
+        promptEmbedding: row.promptEmbedding,
+        adminScore: row.adminScore ?? undefined,
+        adminComment: row.adminComment ?? undefined,
+        ratingAverage: row.ratingAverage ?? undefined,
+        ratingCount: row.ratingCount ?? undefined,
+        ratingSum: row.ratingSum ?? undefined,
+        votesFor: row.votesFor,
+        votesAgainst: row.votesAgainst,
+        usedAsExampleCount: row.usedAsExampleCount,
+        source: row.source
+      }))
+  }
+
+  public async markUsedAsExamples(ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) {
+      return
+    }
+    await this.db
+      .update(jokeMemory)
+      .set({
+        usedAsExampleCount: sql`${jokeMemory.usedAsExampleCount} + 1`,
+        lastUsedAsExampleAt: new Date()
+      })
+      .where(inArray(jokeMemory.id, [...ids]))
+  }
+
   public async findRecent(limit: number): Promise<readonly JokeMemoryEntry[]> {
     const rows = await this.db
       .select()
@@ -127,5 +195,31 @@ export class JokeMemoryRepository {
 
   private buildFingerprint(prompt: string, punchline: string): string {
     return `${prompt.toLowerCase().trim()}::${punchline.toLowerCase().trim()}`
+  }
+
+  private buildQualityFilter(filter: CandidateFilter) {
+    if (filter === 'positive') {
+      return or(
+        gte(jokeMemory.adminScore, POSITIVE_ADMIN_SCORE_MIN),
+        and(
+          gte(jokeMemory.ratingAverage, POSITIVE_RATING_AVG_MIN),
+          gte(jokeMemory.ratingCount, RATING_COUNT_MIN)
+        )
+      )
+    }
+    return or(
+      and(
+        isNotNull(jokeMemory.adminScore),
+        lte(jokeMemory.adminScore, NEGATIVE_ADMIN_SCORE_MAX)
+      ),
+      and(
+        lte(jokeMemory.ratingAverage, NEGATIVE_RATING_AVG_MAX),
+        gte(jokeMemory.ratingCount, RATING_COUNT_MIN)
+      )
+    )
+  }
+
+  private toVectorLiteral(vec: readonly number[]): string {
+    return `[${vec.join(',')}]`
   }
 }

@@ -1,11 +1,22 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { EmbeddingService } from '../embedding/embedding.service'
+import { CandidateFilter, JokeMemoryRepository } from './joke-memory.repository'
 import { FinetuneSample } from './models/finetune-sample.type'
+import { JokeMemoryCandidate } from './models/joke-memory-candidate.type'
 import { JokeMemoryEntry } from './models/joke-memory-entry.type'
 import { JokeMemoryExample } from './models/joke-memory-example.type'
 import { JokeMemoryRecordInput } from './models/joke-memory-record-input.type'
 import { JokeMemoryRetrievalInput } from './models/joke-memory-retrieval-input.type'
-import { JokeMemoryRepository } from './joke-memory.repository'
+import {
+  JokeMemoryBotRetrievalInput,
+  JokeMemoryRetrievalEntry,
+  JokeMemoryRetrievalResult
+} from './models/joke-memory-retrieval-result.type'
+import {
+  calculateInvertedUseScore,
+  calculateUseScore,
+  selectViaMmr
+} from './scoring.util'
 
 const MIN_TEXT_LENGTH: number = 4
 const MAX_TEXT_LENGTH: number = 140
@@ -15,12 +26,17 @@ const MIN_VOTE_SHARE_DEFAULT: number = 0.5
 const MIN_IMPRESSIONS_DEFAULT: number = 2
 const VECTOR_SIMILARITY_MIN: number = 0.25
 
+const BOT_POSITIVE_COUNT_DEFAULT: number = 6
+const BOT_NEGATIVE_COUNT_DEFAULT: number = 3
+const BOT_CANDIDATE_POOL_SIZE: number = 30
+
 type RecordQueueItem = {
   readonly payload: JokeMemoryRecordInput
 }
 
 @Injectable()
 export class JokeMemoryService {
+  private readonly logger: Logger = new Logger(JokeMemoryService.name)
   private readonly recordQueue: RecordQueueItem[] = []
   private isProcessingQueue: boolean = false
 
@@ -28,6 +44,102 @@ export class JokeMemoryService {
     private readonly jokeMemoryRepository: JokeMemoryRepository,
     private readonly embeddingService: EmbeddingService
   ) {}
+
+  public async executeRetrieveBotExamples(
+    input: JokeMemoryBotRetrievalInput
+  ): Promise<JokeMemoryRetrievalResult> {
+    const normalizedPrompt: string = this.normalizeText(input.prompt)
+    if (!this.isValidText(normalizedPrompt)) {
+      return { positive: [], negative: [] }
+    }
+    const embedding = await this.embeddingService.executeEmbedText({ text: normalizedPrompt })
+    if (!embedding) {
+      this.logger.warn('bot_retrieve_embed_failed returning_empty_pools')
+      return { positive: [], negative: [] }
+    }
+    const positiveCount: number = input.positiveCount ?? BOT_POSITIVE_COUNT_DEFAULT
+    const negativeCount: number = input.negativeCount ?? BOT_NEGATIVE_COUNT_DEFAULT
+
+    const [positiveCandidates, negativeCandidates] = await Promise.all([
+      this.jokeMemoryRepository.findCandidatesForBot({
+        queryEmbedding: embedding.vector,
+        filter: 'positive',
+        limit: BOT_CANDIDATE_POOL_SIZE
+      }),
+      this.jokeMemoryRepository.findCandidatesForBot({
+        queryEmbedding: embedding.vector,
+        filter: 'negative',
+        limit: BOT_CANDIDATE_POOL_SIZE
+      })
+    ])
+
+    const positive: readonly JokeMemoryRetrievalEntry[] = this.selectExamples(
+      positiveCandidates,
+      'positive',
+      positiveCount
+    )
+    const negative: readonly JokeMemoryRetrievalEntry[] = this.selectExamples(
+      negativeCandidates,
+      'negative',
+      negativeCount
+    )
+
+    const usedIds: string[] = [...positive, ...negative].map((entry) => entry.id)
+    if (usedIds.length > 0) {
+      void this.jokeMemoryRepository.markUsedAsExamples(usedIds).catch((error: unknown) => {
+        this.logger.warn(
+          `mark_used_failed reason="${error instanceof Error ? error.message : String(error)}"`
+        )
+      })
+    }
+
+    return { positive, negative }
+  }
+
+  private selectExamples(
+    candidates: readonly JokeMemoryCandidate[],
+    filter: CandidateFilter,
+    count: number
+  ): readonly JokeMemoryRetrievalEntry[] {
+    if (candidates.length === 0 || count <= 0) {
+      return []
+    }
+    const scored = candidates.map((candidate) => {
+      const score: number = filter === 'positive'
+        ? calculateUseScore(this.toUseScoreInput(candidate))
+        : calculateInvertedUseScore(this.toUseScoreInput(candidate))
+      return { candidate, score, embedding: candidate.promptEmbedding }
+    })
+    const selected = selectViaMmr(scored, count)
+    return selected.map((item) => this.toRetrievalEntry(item.candidate, item.score, filter))
+  }
+
+  private toUseScoreInput(candidate: JokeMemoryCandidate) {
+    return {
+      adminScore: candidate.adminScore,
+      adminScoreMax: 10,
+      ratingSum: candidate.ratingSum,
+      ratingCount: candidate.ratingCount,
+      votesFor: candidate.votesFor,
+      votesAgainst: candidate.votesAgainst,
+      usedAsExampleCount: candidate.usedAsExampleCount
+    }
+  }
+
+  private toRetrievalEntry(
+    candidate: JokeMemoryCandidate,
+    useScore: number,
+    filter: CandidateFilter
+  ): JokeMemoryRetrievalEntry {
+    return {
+      id: candidate.id,
+      prompt: candidate.prompt,
+      punchline: candidate.punchline,
+      useScore,
+      source: candidate.source,
+      adminComment: filter === 'negative' ? candidate.adminComment : undefined
+    }
+  }
 
   public executeEnqueueRecordJoke(input: JokeMemoryRecordInput): void {
     this.recordQueue.push({ payload: input })

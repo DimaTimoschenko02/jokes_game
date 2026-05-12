@@ -28,15 +28,7 @@ interface ClaudeJsonResponse {
 
 const botAnswerSchema = z.string().min(1).max(140)
 
-export const FALLBACK_PUNCHLINES: readonly string[] = [
-  'это был смелый план ровно до первой минуты.',
-  'я сделал вид, что именно так и задумал.',
-  'соседи теперь аплодируют и боятся.',
-  'я получил опыт и счет за ущерб.',
-  'главное произнести это уверенно.'
-] as const
-
-export const FALLBACK_PUNCHLINE_SET: ReadonlySet<string> = new Set(FALLBACK_PUNCHLINES)
+export const BOT_FALLBACK_MARKER: string = '[BOT_FALLBACK]'
 
 @Injectable()
 export class AiService {
@@ -170,8 +162,6 @@ export class AiService {
     this.logger.log(`bot_punchline_memory prompt="${input.prompt.slice(0, 60)}" examples=${memoryExamples.length} memory_ms=${memoryMs}`)
     const userMessage = createBotPunchlineUserPrompt(
       input.prompt,
-      input.styleTag,
-      input.darknessLevel,
       memoryExamples,
       input.playerNames,
       input.playerContext
@@ -182,14 +172,13 @@ export class AiService {
     const cleaned = this.postProcessBotAnswer(content, input.prompt)
     const result = botAnswerSchema.safeParse(cleaned)
     if (result.success) {
-      this.logger.log(`\n--- PUNCHLINE (style=${input.styleTag} darkness=${input.darknessLevel} latency_ms=${latencyMs} memory_examples=${memoryExamples.length}) ---\n  prompt: "${input.prompt}"\n  raw: "${content.slice(0, 200)}"\n  final: "${result.data}"`)
+      this.logger.log(`\n--- PUNCHLINE (latency_ms=${latencyMs} memory_examples=${memoryExamples.length}) ---\n  prompt: "${input.prompt}"\n  raw: "${content.slice(0, 200)}"\n  final: "${result.data}"`)
       return result.data
     }
     this.fallbackResponses += 1
     this.maybeLogMetrics()
-    const fallback = this.getRandomItem(FALLBACK_PUNCHLINES)
-    this.logger.warn(`generate_bot_answer_fallback latency_ms=${latencyMs} raw="${content.slice(0, 100)}" fallback="${fallback}"`)
-    return fallback
+    this.logger.warn(`generate_bot_answer_fallback latency_ms=${latencyMs} raw="${content.slice(0, 100)}"`)
+    return BOT_FALLBACK_MARKER
   }
 
   // ── Legacy: prompt list generation (fallback) ───────────────────

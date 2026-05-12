@@ -207,16 +207,12 @@ const buildMemorySection = (examples: readonly AiMemoryExample[]): string => {
 
 export const createBotPunchlineUserPrompt = (
   prompt: string,
-  styleTag: string,
-  darknessLevel: number,
   examples: readonly AiMemoryExample[],
   playerNames: readonly string[],
   playerContext: string
 ): string => {
   const lines = [
     `Unfinished sentence: "${prompt}"`,
-    `Darkness: ${darknessLevel}/10`,
-    `Style: ${styleTag}`,
     '',
     'Write 3 punchline candidates. Pick the FUNNIEST one — the one that gets the biggest laugh.',
     'Output ONLY the winning punchline. No numbering, no quotes, no explanation.'

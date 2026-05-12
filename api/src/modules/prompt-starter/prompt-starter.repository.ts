@@ -240,6 +240,38 @@ export class PromptStarterRepository {
     return rows[0]?.value ?? 0
   }
 
+  public async findMaxSimilarityToHistory(embedding: readonly number[]): Promise<number> {
+    if (embedding.length === 0) {
+      return 0
+    }
+    const literal: string = `[${embedding.join(',')}]`
+    const rows = await this.db
+      .select({
+        maxSimilarity: sql<number>`COALESCE(MAX(1 - (${promptStarters.textEmbedding} <=> ${literal}::vector)), 0)`
+      })
+      .from(promptStarters)
+      .where(sql`${promptStarters.textEmbedding} IS NOT NULL`)
+    return rows[0]?.maxSimilarity ?? 0
+  }
+
+  public async upsertWithEmbedding(
+    text: string,
+    embedding: readonly number[],
+    embeddingModel: string
+  ): Promise<void> {
+    const vector: number[] = [...embedding]
+    await this.db
+      .insert(promptStarters)
+      .values({ text, textEmbedding: vector, embeddingModel })
+      .onConflictDoUpdate({
+        target: promptStarters.text,
+        set: {
+          textEmbedding: sql`COALESCE(${promptStarters.textEmbedding}, EXCLUDED.text_embedding)`,
+          embeddingModel: sql`COALESCE(${promptStarters.embeddingModel}, EXCLUDED.embedding_model)`
+        }
+      })
+  }
+
   private async loadCompletionsForPrompts(
     ids: readonly string[]
   ): Promise<Map<string, PromptCompletion[]>> {

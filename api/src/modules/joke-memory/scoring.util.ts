@@ -80,3 +80,69 @@ export function calculateInvertedUseScore(input: UseScoreInput): number {
     invertedPrimary * PRIMARY_QUALITY_WEIGHT + invertedCompetitive * COMPETITIVE_SIGNAL_WEIGHT
   return base * repetitionPenalty
 }
+
+export function cosineSimilarity(left: readonly number[], right: readonly number[]): number {
+  const length: number = Math.min(left.length, right.length)
+  if (length === 0) {
+    return 0
+  }
+  let dot: number = 0
+  let leftNorm: number = 0
+  let rightNorm: number = 0
+  for (let index = 0; index < length; index += 1) {
+    const leftValue: number = left[index]
+    const rightValue: number = right[index]
+    dot += leftValue * rightValue
+    leftNorm += leftValue * leftValue
+    rightNorm += rightValue * rightValue
+  }
+  if (leftNorm <= 0 || rightNorm <= 0) {
+    return 0
+  }
+  return dot / (Math.sqrt(leftNorm) * Math.sqrt(rightNorm))
+}
+
+export type MmrItem = {
+  readonly embedding: readonly number[]
+  readonly score: number
+}
+
+const MMR_LAMBDA_DEFAULT: number = 0.7
+
+export function selectViaMmr<T extends MmrItem>(
+  items: readonly T[],
+  count: number,
+  lambda: number = MMR_LAMBDA_DEFAULT
+): readonly T[] {
+  if (count <= 0 || items.length === 0) {
+    return []
+  }
+  const limit: number = Math.min(count, items.length)
+  const selectedIndices: number[] = []
+  const remaining: Set<number> = new Set(items.map((_, idx) => idx))
+  while (selectedIndices.length < limit && remaining.size > 0) {
+    let bestIdx: number = -1
+    let bestScore: number = -Infinity
+    for (const idx of remaining) {
+      const candidate: T = items[idx]
+      let maxSim: number = 0
+      for (const selIdx of selectedIndices) {
+        const sim: number = cosineSimilarity(candidate.embedding, items[selIdx].embedding)
+        if (sim > maxSim) {
+          maxSim = sim
+        }
+      }
+      const mmr: number = lambda * candidate.score - (1 - lambda) * maxSim
+      if (mmr > bestScore) {
+        bestScore = mmr
+        bestIdx = idx
+      }
+    }
+    if (bestIdx === -1) {
+      break
+    }
+    selectedIndices.push(bestIdx)
+    remaining.delete(bestIdx)
+  }
+  return selectedIndices.map((idx) => items[idx])
+}
