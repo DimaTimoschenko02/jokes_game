@@ -4,6 +4,7 @@ import { ServeStaticModule } from '@nestjs/serve-static'
 import { join } from 'path'
 import { AdminModule } from './modules/admin/admin.module'
 import { AiModule } from './modules/ai/ai.module'
+import { ClaudeAgentModule } from './modules/claude-agent/claude-agent.module'
 import { GameModule } from './modules/game/game.module'
 import { JokeMemoryModule } from './modules/joke-memory/joke-memory.module'
 import { PromptStarterModule } from './modules/prompt-starter/prompt-starter.module'
@@ -18,6 +19,7 @@ const MONGO_URI: string = process.env.MONGO_URI ?? 'mongodb://localhost:27017/pu
       serveRoot: '/admin',
       serveStaticOptions: { index: ['index.html'] }
     }),
+    ClaudeAgentModule,
     JokeMemoryModule,
     AiModule,
     PromptStarterModule,

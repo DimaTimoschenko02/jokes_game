@@ -50,9 +50,13 @@ Desktop.ini
 
 # Tool configs (local)
 .claude/
+.claude-flow/
 .mcp.json
 .swarm/
 ruvector.db
 .cursor/plans/
 .cursor/skills/
 *.stackdump
+
+# Working drafts (final spec lives in docs/superpowers/specs/)
+PLAN.md
