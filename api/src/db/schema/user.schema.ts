@@ -7,6 +7,8 @@ export const userGenderEnum = pgEnum('user_gender', [
   'not-specified'
 ])
 
+export const userRoleEnum = pgEnum('user_role', ['admin', 'user'])
+
 export const users = pgTable(
   'users',
   {
@@ -17,6 +19,7 @@ export const users = pgTable(
     displayName: text('display_name').notNull(),
     gender: userGenderEnum('gender').notNull().default('not-specified'),
     bio: text('bio'),
+    role: userRoleEnum('role').notNull().default('user'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
   },

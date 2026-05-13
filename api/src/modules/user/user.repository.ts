@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { DATABASE } from '../../db/db.module'
 import { Db } from '../../db/db.types'
 import { UserInsert, users } from '../../db/schema/user.schema'
-import { UserGender, UserProfile } from './models/user-profile.type'
+import { UserGender, UserProfile, UserRole } from './models/user-profile.type'
 
 @Injectable()
 export class UserRepository {
@@ -17,6 +17,7 @@ export class UserRepository {
     readonly displayName: string
     readonly gender: UserGender
     readonly bio: string | null
+    readonly role: UserRole
     readonly createdAt: Date
   } | null> {
     const rows = await this.db.select().from(users).where(eq(users.login, login)).limit(1)
@@ -32,6 +33,7 @@ export class UserRepository {
       displayName: row.displayName,
       gender: row.gender,
       bio: row.bio,
+      role: row.role,
       createdAt: row.createdAt
     }
   }
@@ -76,6 +78,7 @@ export class UserRepository {
       displayName: row.displayName,
       gender: row.gender,
       bio: row.bio,
+      role: row.role,
       createdAt: row.createdAt
     }
   }

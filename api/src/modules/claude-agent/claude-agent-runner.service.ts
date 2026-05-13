@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import spawn from 'cross-spawn'
 import { randomUUID } from 'node:crypto'
-import { rm } from 'node:fs/promises'
+import { copyFile, mkdir, rm, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentConfig } from './models/agent-config.type'
@@ -17,6 +17,10 @@ import { AgentSession } from './models/agent-session.type'
 const CLAUDE_CLI_BINARY: string = 'claude'
 const WORKING_DIR: string = tmpdir()
 const CLAUDE_PROJECTS_DIR_NAME: string = 'projects'
+const ISOLATED_HOME_DIR: string = join(tmpdir(), 'punchme-claude-home')
+const ISOLATED_CLAUDE_DIR: string = join(ISOLATED_HOME_DIR, '.claude')
+const REAL_HOME_DIR: string = homedir()
+const AUTH_FILES_TO_COPY: readonly string[] = ['.credentials.json', 'settings.json']
 
 type ClaudeCliJsonResult = {
   readonly type: string
@@ -50,6 +54,60 @@ export type AgentStartResult<T> = {
 @Injectable()
 export class ClaudeAgentRunnerService {
   private readonly logger: Logger = new Logger(ClaudeAgentRunnerService.name)
+  private isolatedHomeReady: boolean = false
+  private isolatedHomeReadyPromise: Promise<boolean> | null = null
+
+  private async ensureIsolatedHome(): Promise<boolean> {
+    if (this.isolatedHomeReady) {
+      return true
+    }
+    if (this.isolatedHomeReadyPromise) {
+      return this.isolatedHomeReadyPromise
+    }
+    this.isolatedHomeReadyPromise = this.buildIsolatedHome()
+    const result = await this.isolatedHomeReadyPromise
+    this.isolatedHomeReady = result
+    return result
+  }
+
+  private async buildIsolatedHome(): Promise<boolean> {
+    try {
+      await mkdir(ISOLATED_CLAUDE_DIR, { recursive: true })
+      const realClaudeDir: string = join(REAL_HOME_DIR, '.claude')
+      let copiedCount: number = 0
+      for (const name of AUTH_FILES_TO_COPY) {
+        const src: string = join(realClaudeDir, name)
+        const dst: string = join(ISOLATED_CLAUDE_DIR, name)
+        try {
+          await stat(src)
+        } catch {
+          continue
+        }
+        await copyFile(src, dst)
+        copiedCount += 1
+      }
+      this.logger.log(
+        `isolated_home_ready dir=${ISOLATED_HOME_DIR} auth_files=${copiedCount}`
+      )
+      return true
+    } catch (error) {
+      this.logger.warn(
+        `isolated_home_build_failed dir=${ISOLATED_HOME_DIR} reason="${error instanceof Error ? error.message : String(error)}" — falling back to real HOME (CLAUDE.md leak possible)`
+      )
+      return false
+    }
+  }
+
+  private buildSpawnEnv(isolatedReady: boolean): NodeJS.ProcessEnv {
+    if (!isolatedReady) {
+      return process.env
+    }
+    return {
+      ...process.env,
+      HOME: ISOLATED_HOME_DIR,
+      USERPROFILE: ISOLATED_HOME_DIR
+    }
+  }
 
   public async start<T>(
     config: AgentConfig<T>,
@@ -139,10 +197,13 @@ export class ClaudeAgentRunnerService {
   ): Promise<AgentResponse<T>> {
     const startedAt: number = Date.now()
     const args: string[] = this.buildCliArgs(config, mode)
+    const isolatedReady: boolean = await this.ensureIsolatedHome()
+    const env: NodeJS.ProcessEnv = this.buildSpawnEnv(isolatedReady)
     return new Promise<AgentResponse<T>>((resolve, reject) => {
       const proc = spawn(CLAUDE_CLI_BINARY, args, {
         cwd: WORKING_DIR,
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env
       })
       proc.stdin?.write(userPrompt)
       proc.stdin?.end()
@@ -301,7 +362,8 @@ export class ClaudeAgentRunnerService {
 
   private resolveSessionFilePath(sessionId: string): string {
     const projectDirEncoded: string = this.encodeProjectDir(WORKING_DIR)
-    return join(homedir(), '.claude', CLAUDE_PROJECTS_DIR_NAME, projectDirEncoded, `${sessionId}.jsonl`)
+    const homeDir: string = this.isolatedHomeReady ? ISOLATED_HOME_DIR : REAL_HOME_DIR
+    return join(homeDir, '.claude', CLAUDE_PROJECTS_DIR_NAME, projectDirEncoded, `${sessionId}.jsonl`)
   }
 
   private encodeProjectDir(absolutePath: string): string {

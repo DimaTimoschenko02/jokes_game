@@ -95,6 +95,7 @@ function App(): ReactElement {
   const [roomCodeToJoin, setRoomCodeToJoin] = useState<string>(getRoomCodeFromUrl() ?? '')
   const [roundCount, setRoundCount] = useState<number>(DEFAULT_ROUNDS)
   const [botCount, setBotCount] = useState<number>(DEFAULT_BOTS)
+  const [testMode, setTestMode] = useState<boolean>(false)
   const [answers, setAnswers] = useState<[string, string]>(['', ''])
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [ratingFlashItemId, setRatingFlashItemId] = useState<string | null>(null)
@@ -234,7 +235,8 @@ function App(): ReactElement {
   }, [gameState?.phase, flushOpeningFeedback, openingFeedbackSent])
 
   const handleCreateRoom = (): void => {
-    executeCreateRoom({ roundCount, botCount })
+    const isAdmin: boolean = user?.role === 'admin'
+    executeCreateRoom({ roundCount, botCount, testMode: isAdmin ? testMode : undefined })
   }
 
   const handleJoinRoom = (): void => {
@@ -387,6 +389,16 @@ function App(): ReactElement {
               </select>
             </label>
           </div>
+          {user?.role === 'admin' && (
+            <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={testMode}
+                onChange={(event) => setTestMode(event.target.checked)}
+              />
+              <span>Тестовая комната (не записывать в БД)</span>
+            </label>
+          )}
           <button className="primary" onClick={handleCreateRoom}>
             Создать комнату
           </button>
@@ -413,7 +425,10 @@ function App(): ReactElement {
       <section className="panel">
         <header className="header">
           <div>
-            <h1>Комната {gameState.roomCode}</h1>
+            <h1>
+              Комната {gameState.roomCode}
+              {gameState.testMode && <span style={{ marginLeft: 8, fontSize: '0.6em', color: '#f59e0b' }}>TEST</span>}
+            </h1>
             <p className="subtitle">
               Раунд {Math.max(gameState.roundIndex, 1)} из {gameState.roundCount}
             </p>

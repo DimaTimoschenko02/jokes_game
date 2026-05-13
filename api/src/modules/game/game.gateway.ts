@@ -7,7 +7,8 @@ import {
   OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
-  WebSocketServer
+  WebSocketServer,
+  WsException
 } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
 import { AuthService } from '../auth/auth.service'
@@ -42,7 +43,14 @@ type SocketQueryPayload = {
   new ValidationPipe({
     whitelist: true,
     transform: true,
-    forbidNonWhitelisted: true
+    forbidNonWhitelisted: true,
+    exceptionFactory: (errors) => {
+      const summary: string = errors
+        .map((err) => `${err.property}=${JSON.stringify(err.value)}:[${Object.values(err.constraints ?? {}).join(',')}]`)
+        .join(' | ')
+      new Logger('GameGateway').warn(`ws_validation_failed ${summary}`)
+      return new WsException({ status: 'validation_error', errors: summary })
+    }
   })
 )
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
@@ -130,7 +138,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       socketId: client.id,
       host: userProfile,
       roundCount: body.roundCount,
-      botCount: body.botCount
+      botCount: body.botCount,
+      testMode: body.testMode
     })
     client.join(session.roomCode)
     client.emit('session', session)
@@ -199,6 +208,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     @ConnectedSocket() client: SocketWithUser,
     @MessageBody() body: SubmitRatingsDto
   ): void {
+    this.logger.log(
+      `ws_submit_ratings_in room=${body.roomCode} user=${client.data.userId} ratings_count=${body.ratings?.length ?? 0}`
+    )
     this.gameService.submitRatings({
       roomCode: body.roomCode,
       playerId: client.data.userId,

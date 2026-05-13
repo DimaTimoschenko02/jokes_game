@@ -23,6 +23,7 @@ export type GameRoom = {
   players: Map<string, Player>
   roundCount: number
   botCount: number
+  collectData: boolean
   phase: GamePhase
   roundIndex: number
   prompts: readonly string[]

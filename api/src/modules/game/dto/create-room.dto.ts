@@ -1,4 +1,4 @@
-import { IsInt, Max, Min } from 'class-validator'
+import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator'
 import {
   BOT_COUNT_MAX,
   BOT_COUNT_MIN,
@@ -16,4 +16,8 @@ export class CreateRoomDto {
   @Min(BOT_COUNT_MIN)
   @Max(BOT_COUNT_MAX)
   public botCount!: number
+
+  @IsOptional()
+  @IsBoolean()
+  public testMode?: boolean
 }

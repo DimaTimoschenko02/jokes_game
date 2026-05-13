@@ -6,6 +6,7 @@ import type { PlayerSession } from '../models/player-session.type'
 export type CreateRoomPayload = {
   readonly roundCount: number
   readonly botCount: number
+  readonly testMode?: boolean
 }
 
 export type JoinRoomPayload = {

@@ -93,6 +93,7 @@ export class GameService {
     readonly host: UserProfile
     readonly roundCount: number
     readonly botCount: number
+    readonly testMode?: boolean
   }): Promise<PlayerSession> {
     const host = createHumanPlayer({
       userId: input.host.id,
@@ -102,6 +103,8 @@ export class GameService {
       bio: input.host.bio,
       gender: input.host.gender
     })
+    const isAdmin: boolean = input.host.role === 'admin'
+    const testMode: boolean = isAdmin && Boolean(input.testMode)
     const roomCode = createRoomCode()
     const room: GameRoom = {
       code: roomCode,
@@ -109,6 +112,7 @@ export class GameService {
       players: new Map([[host.id, host]]),
       roundCount: this.normalizeRoundCount(input.roundCount),
       botCount: this.normalizeBotCount(input.botCount),
+      collectData: !testMode,
       phase: 'lobby',
       roundIndex: 0,
       prompts: [],
@@ -403,7 +407,9 @@ export class GameService {
     }
 
     const diverse = this.openingSelection.selectDiverse(accepted, needed)
-    void this.openingSelection.registerSelected(diverse).catch(() => undefined)
+    if (room.collectData) {
+      void this.openingSelection.registerSelected(diverse).catch(() => undefined)
+    }
     return diverse.map((opening) => opening.text)
   }
 
@@ -787,36 +793,8 @@ export class GameService {
     this.setRoomTimer(room, VOTING_PHASE_SECONDS, () => this.advanceVoting(room.code))
   }
 
-  private scheduleBotVote(room: GameRoom): void {
-    const duel = room.duels[room.duelIndex]
-    if (!duel) {
-      return
-    }
-    room.players.forEach((player) => {
-      if (!player.isBot) {
-        return
-      }
-      if (!this.canPlayerVote(duel, player.id)) {
-        return
-      }
-      const delayMs = 900 + Math.floor(Math.random() * 1600)
-      setTimeout(() => {
-        const currentRoom = this.rooms.get(room.code)
-        if (!currentRoom || currentRoom.phase !== 'voting') {
-          return
-        }
-        const currentDuel = currentRoom.duels[currentRoom.duelIndex]
-        if (!currentDuel || currentDuel.closed || !this.canPlayerVote(currentDuel, player.id)) {
-          return
-        }
-        const side: 'left' | 'right' = Math.random() > 0.5 ? 'left' : 'right'
-        currentDuel.votes.set(player.id, side)
-        this.emitRoomState(currentRoom.code)
-        if (this.hasAllVotes(currentRoom, currentDuel)) {
-          this.advanceVoting(currentRoom.code)
-        }
-      }, delayMs)
-    })
+  private scheduleBotVote(_room: GameRoom): void {
+    // Bots no longer vote in duels — only humans decide.
   }
 
   private canPlayerVote(duel: { readonly leftPlayerId: string; readonly rightPlayerId: string }, playerId: string): boolean {
@@ -824,7 +802,12 @@ export class GameService {
   }
 
   private hasAllVotes(room: GameRoom, duel: { readonly votes: Map<string, 'left' | 'right'>; readonly leftPlayerId: string; readonly rightPlayerId: string }): boolean {
-    const eligibleVoters = Array.from(room.players.values()).filter((player) => this.canPlayerVote(duel, player.id))
+    const eligibleVoters = Array.from(room.players.values()).filter(
+      (player) => !player.isBot && this.canPlayerVote(duel, player.id)
+    )
+    if (eligibleVoters.length === 0) {
+      return false
+    }
     return eligibleVoters.every((player) => duel.votes.has(player.id))
   }
 
@@ -879,6 +862,9 @@ export class GameService {
     }
     const player = this.getPlayerOrFail(room, input.playerId)
     if (player.isBot) {
+      return
+    }
+    if (!room.collectData) {
       return
     }
     const allowedLevels: readonly number[] = [-1, -0.5, 0.5, 1]
@@ -960,6 +946,10 @@ export class GameService {
     this.logger.log(
       `memory_updater_round room=${room.code} round=${room.roundIndex} users_updated=${Object.keys(updates.updates).length}`
     )
+    if (!room.collectData) {
+      this.logger.log(`memory_updater_skip_test_mode room=${room.code} round=${room.roundIndex}`)
+      return
+    }
     try {
       await this.userMemoryService.applyUpdates(updates)
     } catch (error: unknown) {
@@ -1114,7 +1104,8 @@ export class GameService {
       ratingSubmitters: this.getRatingSubmitters(room),
       ratingItems: room.ratingItems,
       timerSecondsLeft: this.getTimerSecondsLeft(room.timerEndsAt),
-      aiStatus: room.aiStatus
+      aiStatus: room.aiStatus,
+      testMode: !room.collectData
     }
   }
 
@@ -1352,6 +1343,10 @@ export class GameService {
       this.logger.log(`joke_memory_skip_fallback room=${room.code} round=${room.roundIndex} prompt="${item.prompt.slice(0, 60)}" punchline="${item.punchline.slice(0, 60)}"`)
       return
     }
+    if (!room.collectData) {
+      this.logger.log(`joke_memory_skip_test_mode room=${room.code} round=${room.roundIndex}`)
+      return
+    }
     const votesFor = votes?.votesFor ?? 0
     const votesAgainst = votes?.votesAgainst ?? 0
     const ratingAverage = ratingStats?.average
@@ -1382,6 +1377,9 @@ export class GameService {
   }
 
   private evaluateAndSaveGoldenOpenings(room: GameRoom): void {
+    if (!room.collectData) {
+      return
+    }
     void this.executeGoldenEvaluation(room).catch((error: unknown) => {
       this.logger.warn(`golden_evaluation_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`)
     })
