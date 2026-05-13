@@ -12,9 +12,8 @@ export interface PromptCompletion {
 }
 
 export interface UserQuickFeedbackAggregate {
-  readonly up: number
-  readonly down: number
-  readonly broken: number
+  readonly sum: number
+  readonly count: number
 }
 
 export interface PromptStarterEntry {

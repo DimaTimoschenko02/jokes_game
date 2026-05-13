@@ -32,9 +32,11 @@ export type SubmitRatingsPayload = {
   readonly ratings: readonly { readonly itemId: string; readonly score: number }[]
 }
 
+export type FeedbackLevel = -1 | -0.5 | 0.5 | 1
+
 export type SubmitOpeningFeedbackPayload = {
   readonly roomCode: string
-  readonly items: readonly { readonly promptIndex: number; readonly verdict: 'up' | 'down' | 'broken' }[]
+  readonly items: readonly { readonly promptIndex: number; readonly level: FeedbackLevel }[]
 }
 
 type GameSocketHandlers = {

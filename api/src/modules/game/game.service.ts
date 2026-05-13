@@ -206,6 +206,8 @@ export class GameService {
       return
     }
     room.isStarting = true
+    room.aiStatus = 'generating'
+    this.emitRoomState(room.code)
     try {
       this.resetPlayerScores(room)
       room.roundIndex = 0
@@ -218,6 +220,9 @@ export class GameService {
       await this.startWritingPhase(room.code)
     } finally {
       room.isStarting = false
+      if (room.aiStatus === 'generating') {
+        room.aiStatus = 'idle'
+      }
     }
   }
 
@@ -866,7 +871,7 @@ export class GameService {
   public submitOpeningFeedback(input: {
     readonly roomCode: string
     readonly playerId: string
-    readonly items: readonly { readonly promptIndex: number; readonly verdict: 'up' | 'down' | 'broken' }[]
+    readonly items: readonly { readonly promptIndex: number; readonly level: number }[]
   }): void {
     const room = this.getRoomOrFail(input.roomCode)
     if (room.phase !== 'writing') {
@@ -876,16 +881,20 @@ export class GameService {
     if (player.isBot) {
       return
     }
+    const allowedLevels: readonly number[] = [-1, -0.5, 0.5, 1]
     for (const item of input.items) {
+      if (!allowedLevels.includes(item.level)) {
+        continue
+      }
       const promptText = room.prompts[item.promptIndex]
       if (!promptText) {
         continue
       }
       void this.promptStarterService
-        .applyQuickFeedback({ promptText, verdict: item.verdict })
+        .applyQuickFeedback({ promptText, level: item.level })
         .catch((error: unknown) => {
           this.logger.warn(
-            `opening_feedback_failed room=${room.code} prompt="${promptText.slice(0, 60)}" verdict=${item.verdict} error=${error instanceof Error ? error.message : String(error)}`
+            `opening_feedback_failed room=${room.code} prompt="${promptText.slice(0, 60)}" level=${item.level} error=${error instanceof Error ? error.message : String(error)}`
           )
         })
     }
@@ -1272,6 +1281,9 @@ export class GameService {
       map.set(rating.itemId, rating.score)
     })
     room.ratingSubmissions.set(playerId, map)
+    this.logger.log(
+      `rating_submit room=${room.code} round=${room.roundIndex} player=${playerId} received=${ratings.length} accepted=${filtered.length}`
+    )
   }
 
   private filterRatings(
@@ -1300,6 +1312,10 @@ export class GameService {
 
   private persistRoundRatings(room: GameRoom): void {
     const ratingsByItem = this.aggregateRatings(room)
+    const itemsWithRatings: number = Array.from(ratingsByItem.values()).filter((stats) => stats.count > 0).length
+    this.logger.log(
+      `persist_ratings room=${room.code} round=${room.roundIndex} submissions=${room.ratingSubmissions.size} items=${room.ratingItems.length} items_rated=${itemsWithRatings}`
+    )
     room.ratingItems.forEach((item) => {
       const votes = room.roundVotes.get(item.id)
       const ratingStats = ratingsByItem.get(item.id)

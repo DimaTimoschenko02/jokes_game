@@ -55,16 +55,16 @@ export class ClaudeAgentRunnerService {
     config: AgentConfig<T>,
     initialUserPrompt: string
   ): Promise<AgentStartResult<T>> {
-    const sessionId: string = randomUUID()
+    const initialSessionId: string = randomUUID()
+    const { response, sessionId } = await this.invokeWithRetries<T>(config, initialUserPrompt, {
+      kind: 'start',
+      sessionId: initialSessionId
+    })
     const session: AgentSession<T> = {
       id: sessionId,
       config,
       createdAt: new Date()
     }
-    const response = await this.invokeWithRetries<T>(config, initialUserPrompt, {
-      kind: 'start',
-      sessionId
-    })
     return { session, response }
   }
 
@@ -72,10 +72,11 @@ export class ClaudeAgentRunnerService {
     session: AgentSession<T>,
     userPrompt: string
   ): Promise<AgentResponse<T>> {
-    return this.invokeWithRetries<T>(session.config, userPrompt, {
+    const { response } = await this.invokeWithRetries<T>(session.config, userPrompt, {
       kind: 'resume',
       sessionId: session.id
     })
+    return response
   }
 
   public async end(session: AgentSession<unknown>): Promise<void> {
@@ -94,17 +95,31 @@ export class ClaudeAgentRunnerService {
     config: AgentConfig<T>,
     userPrompt: string,
     mode: InvokeMode
-  ): Promise<AgentResponse<T>> {
+  ): Promise<{ readonly response: AgentResponse<T>; readonly sessionId: string }> {
     let lastError: Error | null = null
+    let currentSessionId: string = mode.sessionId
     const totalAttempts: number = config.retries + 1
     for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+      const attemptMode: InvokeMode =
+        mode.kind === 'start'
+          ? { kind: 'start', sessionId: currentSessionId }
+          : { kind: 'resume', sessionId: currentSessionId }
       try {
-        return await this.singleInvoke<T>(config, userPrompt, mode)
+        const response = await this.singleInvoke<T>(config, userPrompt, attemptMode)
+        return { response, sessionId: currentSessionId }
       } catch (error) {
         lastError = error as Error
         this.logger.warn(
-          `agent_invoke_retry agent=${config.name} mode=${mode.kind} attempt=${attempt}/${totalAttempts} reason="${lastError.message}"`
+          `agent_invoke_retry agent=${config.name} mode=${attemptMode.kind} attempt=${attempt}/${totalAttempts} session=${currentSessionId} reason="${lastError.message}"`
         )
+        if (lastError instanceof AgentParseError && lastError.raw) {
+          this.logger.warn(
+            `agent_invoke_raw agent=${config.name} attempt=${attempt} raw=${JSON.stringify(lastError.raw)}`
+          )
+        }
+        if (mode.kind === 'start' && attempt < totalAttempts) {
+          currentSessionId = randomUUID()
+        }
       }
     }
     throw (

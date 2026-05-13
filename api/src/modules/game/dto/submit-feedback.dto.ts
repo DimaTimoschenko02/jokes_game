@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsIn, IsInt, IsString, Length, Min, ValidateNested } from 'class-validator'
+import { ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsString, Length, Min, ValidateNested } from 'class-validator'
 import { Type } from 'class-transformer'
 
 export class OpeningFeedbackItemDto {
@@ -6,9 +6,9 @@ export class OpeningFeedbackItemDto {
   @Min(0)
   public promptIndex!: number
 
-  @IsString()
-  @IsIn(['up', 'down', 'broken'])
-  public verdict!: 'up' | 'down' | 'broken'
+  @IsNumber()
+  @IsIn([-1, -0.5, 0.5, 1])
+  public level!: number
 }
 
 export class SubmitOpeningFeedbackDto {

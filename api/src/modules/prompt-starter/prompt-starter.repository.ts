@@ -240,21 +240,13 @@ export class PromptStarterRepository {
     return rows[0]?.value ?? 0
   }
 
-  public async applyQuickFeedback(text: string, verdict: 'up' | 'down' | 'broken'): Promise<void> {
-    const upDelta: number = verdict === 'up' ? 1 : 0
-    const downDelta: number = verdict === 'down' ? 1 : 0
-    const brokenDelta: number = verdict === 'broken' ? 1 : 0
+  public async applyQuickFeedback(text: string, level: number): Promise<void> {
     await this.db
       .update(promptStarters)
       .set({
-        quickFeedbackUp: sql`${promptStarters.quickFeedbackUp} + ${upDelta}`,
-        quickFeedbackDown: sql`${promptStarters.quickFeedbackDown} + ${downDelta}`,
-        quickFeedbackBroken: sql`${promptStarters.quickFeedbackBroken} + ${brokenDelta}`,
-        feedbackScore: sql`CASE
-          WHEN ${promptStarters.quickFeedbackUp} + ${upDelta} + ${promptStarters.quickFeedbackDown} + ${downDelta} + ${promptStarters.quickFeedbackBroken} + ${brokenDelta} = 0
-          THEN 0
-          ELSE ((${promptStarters.quickFeedbackUp} + ${upDelta})::real - (${promptStarters.quickFeedbackDown} + ${downDelta}) - (${promptStarters.quickFeedbackBroken} + ${brokenDelta})) / (${promptStarters.quickFeedbackUp} + ${upDelta} + ${promptStarters.quickFeedbackDown} + ${downDelta} + ${promptStarters.quickFeedbackBroken} + ${brokenDelta})
-        END`
+        feedbackSum: sql`${promptStarters.feedbackSum} + ${level}`,
+        feedbackCount: sql`${promptStarters.feedbackCount} + 1`,
+        feedbackScore: sql`(${promptStarters.feedbackSum} + ${level}) / (${promptStarters.feedbackCount} + 1)::real`
       })
       .where(eq(promptStarters.text, text))
   }
@@ -263,6 +255,7 @@ export class PromptStarterRepository {
     readonly limit: number
     readonly maxFeedbackScore: number
     readonly maxAdminScore: number
+    readonly minVotes: number
   }): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
     const rows = await this.db
       .select({
@@ -273,7 +266,7 @@ export class PromptStarterRepository {
       })
       .from(promptStarters)
       .where(
-        sql`(${promptStarters.feedbackScore} <= ${input.maxFeedbackScore} AND (${promptStarters.quickFeedbackUp} + ${promptStarters.quickFeedbackDown} + ${promptStarters.quickFeedbackBroken}) >= 3) OR (${promptStarters.adminScore} <= ${input.maxAdminScore})`
+        sql`(${promptStarters.feedbackScore} <= ${input.maxFeedbackScore} AND ${promptStarters.feedbackCount} >= ${input.minVotes}) OR (${promptStarters.adminScore} <= ${input.maxAdminScore})`
       )
       .orderBy(asc(promptStarters.feedbackScore), asc(promptStarters.adminScore))
       .limit(input.limit)
@@ -378,9 +371,8 @@ export class PromptStarterRepository {
       averageVoteShare: row.averageVoteShare ?? undefined,
       goldenSince: row.goldenSince ?? undefined,
       userQuickFeedback: {
-        up: row.quickFeedbackUp,
-        down: row.quickFeedbackDown,
-        broken: row.quickFeedbackBroken
+        sum: row.feedbackSum,
+        count: row.feedbackCount
       },
       feedbackScore: row.feedbackScore,
       adminScore: row.adminScore ?? undefined,

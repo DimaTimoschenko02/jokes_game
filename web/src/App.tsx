@@ -37,7 +37,14 @@ const DEFAULT_ROUNDS: number = 4
 const DEFAULT_BOTS: number = 1
 const ROOM_CODE_LENGTH: number = 5
 
-type FeedbackVerdict = 'up' | 'down' | 'broken'
+type FeedbackLevel = -1 | -0.5 | 0.5 | 1
+
+const FEEDBACK_LEVELS: readonly { readonly level: FeedbackLevel; readonly icon: string; readonly label: string }[] = [
+  { level: -1, icon: '👎👎', label: 'Совсем плохо' },
+  { level: -0.5, icon: '👎', label: 'Слабо' },
+  { level: 0.5, icon: '👍', label: 'Неплохо' },
+  { level: 1, icon: '👍👍', label: 'Отлично' }
+]
 
 const getPlayerNameById = (players: readonly ClientPlayer[], playerId: string): string => {
   const player = players.find((item) => item.id === playerId)
@@ -45,7 +52,9 @@ const getPlayerNameById = (players: readonly ClientPlayer[], playerId: string): 
 }
 
 const buildRatingPayload = (ratings: Record<string, number>): readonly { readonly itemId: string; readonly score: number }[] =>
-  Object.entries(ratings).map(([itemId, score]) => ({ itemId, score }))
+  Object.entries(ratings)
+    .filter(([, score]) => Number.isInteger(score) && score >= 1 && score <= 10)
+    .map(([itemId, score]) => ({ itemId, score }))
 
 const getRatingLabel = (value: number): string => (value ? `${value}/10` : 'Оценка')
 
@@ -94,7 +103,7 @@ function App(): ReactElement {
   const [linkCopied, setLinkCopied] = useState<boolean>(false)
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false)
   const [localTimer, setLocalTimer] = useState<number | null>(null)
-  const [openingFeedback, setOpeningFeedback] = useState<Record<number, FeedbackVerdict>>({})
+  const [openingFeedback, setOpeningFeedback] = useState<Record<number, FeedbackLevel>>({})
   const [openingFeedbackSent, setOpeningFeedbackSent] = useState<boolean>(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -207,9 +216,9 @@ function App(): ReactElement {
     if (!session || openingFeedbackSent) {
       return
     }
-    const items = Object.entries(openingFeedback).map(([promptIndex, verdict]) => ({
+    const items = Object.entries(openingFeedback).map(([promptIndex, level]) => ({
       promptIndex: Number(promptIndex),
-      verdict
+      level
     }))
     if (items.length === 0) {
       return
@@ -295,13 +304,13 @@ function App(): ReactElement {
     })
   }, [session])
 
-  const togglePromptFeedback = (promptIndex: number, verdict: FeedbackVerdict): void => {
+  const togglePromptFeedback = (promptIndex: number, level: FeedbackLevel): void => {
     setOpeningFeedback((current) => {
       const next = { ...current }
-      if (next[promptIndex] === verdict) {
+      if (next[promptIndex] === level) {
         delete next[promptIndex]
       } else {
-        next[promptIndex] = verdict
+        next[promptIndex] = level
       }
       return next
     })
@@ -518,29 +527,27 @@ function App(): ReactElement {
             {[0, 1].map((slot) => {
               const promptText = myPromptLabels[slot]
               const assignedIndex = myAssignment?.promptIndices[slot]
-              const currentVerdict = assignedIndex != null ? openingFeedback[assignedIndex] : undefined
+              const currentLevel = assignedIndex != null ? openingFeedback[assignedIndex] : undefined
               return (
                 <div key={slot} className="inputGroup">
                   <div className="promptHeader">
                     <span>{promptText}</span>
                     {assignedIndex != null && (
-                      <div className="feedbackButtons" role="group" aria-label="Оценка начала шутки">
-                        {(['up', 'down', 'broken'] as const).map((verdict) => (
+                      <div
+                        className="feedbackButtons"
+                        role="group"
+                        aria-label="Оценка начала шутки. Нейтрально — просто не нажимай."
+                      >
+                        {FEEDBACK_LEVELS.map(({ level, icon, label }) => (
                           <button
-                            key={verdict}
+                            key={level}
                             type="button"
-                            className={`feedbackBtn ${currentVerdict === verdict ? 'feedbackBtnActive' : ''}`}
+                            className={`feedbackBtn ${currentLevel === level ? 'feedbackBtnActive' : ''}`}
                             disabled={openingFeedbackSent}
-                            onClick={() => togglePromptFeedback(assignedIndex, verdict)}
-                            title={
-                              verdict === 'up'
-                                ? 'Нравится'
-                                : verdict === 'down'
-                                ? 'Не нравится'
-                                : 'Сломанное / странное'
-                            }
+                            onClick={() => togglePromptFeedback(assignedIndex, level)}
+                            title={label}
                           >
-                            {verdict === 'up' ? '👍' : verdict === 'down' ? '👎' : '🤢'}
+                            {icon}
                           </button>
                         ))}
                       </div>

@@ -65,9 +65,9 @@ export class PromptStarterService implements OnModuleInit {
 
   public async applyQuickFeedback(input: {
     readonly promptText: string
-    readonly verdict: 'up' | 'down' | 'broken'
+    readonly level: number
   }): Promise<void> {
-    await this.repository.applyQuickFeedback(input.promptText, input.verdict)
+    await this.repository.applyQuickFeedback(input.promptText, input.level)
   }
 
   public async getNegativeOpeningExamples(
@@ -75,8 +75,9 @@ export class PromptStarterService implements OnModuleInit {
   ): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
     return this.repository.findLowRatedOpenings({
       limit,
-      maxFeedbackScore: -0.2,
-      maxAdminScore: 2
+      maxFeedbackScore: -0.5,
+      maxAdminScore: 2,
+      minVotes: 3
     })
   }
 
