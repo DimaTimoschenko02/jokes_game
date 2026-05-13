@@ -123,12 +123,14 @@ export class ClaudeAgentRunnerService {
     mode: InvokeMode
   ): Promise<AgentResponse<T>> {
     const startedAt: number = Date.now()
-    const args: string[] = this.buildCliArgs(config, userPrompt, mode)
+    const args: string[] = this.buildCliArgs(config, mode)
     return new Promise<AgentResponse<T>>((resolve, reject) => {
       const proc = spawn(CLAUDE_CLI_BINARY, args, {
         cwd: WORKING_DIR,
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe']
       })
+      proc.stdin?.write(userPrompt)
+      proc.stdin?.end()
       const stdoutChunks: Buffer[] = []
       const stderrChunks: Buffer[] = []
       let timedOut: boolean = false
@@ -141,6 +143,9 @@ export class ClaudeAgentRunnerService {
       proc.once('error', (error: Error) => {
         clearTimeout(timeoutHandle)
         reject(new AgentSpawnError(`Failed to spawn claude CLI: ${error.message}`, error))
+      })
+      proc.stdin?.on('error', () => {
+        // stdin may close early on timeout/spawn fail — swallow EPIPE so promise resolves via close handler
       })
       proc.once('close', (exitCode: number | null) => {
         clearTimeout(timeoutHandle)
@@ -210,12 +215,12 @@ export class ClaudeAgentRunnerService {
 
   private buildCliArgs(
     config: AgentConfig<unknown>,
-    userPrompt: string,
     mode: InvokeMode
   ): string[] {
     const args: string[] = [
       '-p',
-      userPrompt,
+      '--input-format',
+      'text',
       '--output-format',
       'json',
       '--model',

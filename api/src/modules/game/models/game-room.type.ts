@@ -9,7 +9,6 @@ import { Submission } from './submission.type'
 
 export type BotSessionEntry = {
   readonly session: AgentSession<never>
-  readonly personalityName: string
 }
 
 export type GameRoomSessions = {

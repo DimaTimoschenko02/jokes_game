@@ -1,11 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ClaudeAgentRunnerService } from '../../claude-agent/claude-agent-runner.service'
 import { AgentSession } from '../../claude-agent/models/agent-session.type'
-import {
-  BotPersonality,
-  buildBotAgentConfig,
-  pickRandomBotPersonality
-} from '../configs/bot-agent.config'
+import { BOT_AGENT_CONFIG } from '../configs/bot-agent.config'
 
 export type BotPlayerProfile = {
   readonly userId: string
@@ -32,7 +28,6 @@ export type BotGenerateInput = {
 
 export type BotStartResult = {
   readonly session: AgentSession<never>
-  readonly personalityName: string
 }
 
 @Injectable()
@@ -46,14 +41,10 @@ export class BotAgentService {
     botId: string,
     players: readonly BotPlayerProfile[]
   ): Promise<BotStartResult> {
-    const personality: BotPersonality = pickRandomBotPersonality()
-    const config = buildBotAgentConfig(personality)
     const initialPrompt: string = this.buildInitialPrompt(players)
-    const { session } = await this.runner.start<never>(config, initialPrompt)
-    this.logger.log(
-      `bot_start room=${roomCode} bot=${botId} personality=${personality.name} session=${session.id}`
-    )
-    return { session, personalityName: personality.name }
+    const { session } = await this.runner.start<never>(BOT_AGENT_CONFIG, initialPrompt)
+    this.logger.log(`bot_start room=${roomCode} bot=${botId} session=${session.id}`)
+    return { session }
   }
 
   public async generatePunchline(

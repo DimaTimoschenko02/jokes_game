@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   pgEnum,
@@ -35,6 +36,7 @@ export const jokeMemory = pgTable(
     adminScoredBy: text('admin_scored_by'),
     adminScoredAt: timestamp('admin_scored_at', { withTimezone: true }),
     adminComment: text('admin_comment'),
+    isSeed: boolean('is_seed').notNull().default(false),
     usedAsExampleCount: integer('used_as_example_count').notNull().default(0),
     lastUsedAsExampleAt: timestamp('last_used_as_example_at', { withTimezone: true }),
     authorUserId: text('author_user_id'),

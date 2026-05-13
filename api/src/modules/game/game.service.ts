@@ -135,7 +135,6 @@ export class GameService {
     this.rooms.set(roomCode, room)
     this.socketLinks.set(input.socketId, { roomCode, playerId: host.id })
     this.emitRoomState(roomCode)
-    this.prefetchNextRoundOpenings(room)
     return { roomCode, playerId: host.id }
   }
 
@@ -165,7 +164,6 @@ export class GameService {
     room.players.set(player.id, player)
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })
     this.emitRoomState(room.code)
-    this.prefetchNextRoundOpenings(room)
     return { roomCode: room.code, playerId: player.id }
   }
 
@@ -234,8 +232,7 @@ export class GameService {
         try {
           const result = await this.botAgent.startForBot(room.code, bot.id, profiles)
           room.sessions.botSessions.set(bot.id, {
-            session: result.session,
-            personalityName: result.personalityName
+            session: result.session
           })
         } catch (error: unknown) {
           this.logger.warn(
