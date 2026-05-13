@@ -7,6 +7,6 @@ import { JokeMemoryService } from './joke-memory.service'
 @Module({
   imports: [EmbeddingModule],
   providers: [JokeMemoryRepository, JokeMemoryService, FinetuneDatasetService],
-  exports: [JokeMemoryService, FinetuneDatasetService]
+  exports: [JokeMemoryService, JokeMemoryRepository, FinetuneDatasetService]
 })
 export class JokeMemoryModule {}

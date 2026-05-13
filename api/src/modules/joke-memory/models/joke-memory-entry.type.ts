@@ -1,6 +1,7 @@
 import { JokeMemorySource } from './joke-memory-source.type'
 
 export type JokeMemoryEntry = {
+  readonly id?: string
   readonly prompt: string
   readonly punchline: string
   readonly promptNormalized: string

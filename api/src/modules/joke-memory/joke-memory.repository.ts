@@ -1,5 +1,21 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { and, desc, eq, gte, inArray, isNotNull, lte, or, sql } from 'drizzle-orm'
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+  type SQL,
+  type SQLWrapper
+} from 'drizzle-orm'
 import { DATABASE } from '../../db/db.module'
 import { jokeMemory } from '../../db/schema/joke-memory.schema'
 import { Db } from '../../db/db.types'
@@ -221,5 +237,143 @@ export class JokeMemoryRepository {
 
   private toVectorLiteral(vec: readonly number[]): string {
     return `[${vec.join(',')}]`
+  }
+
+  public async findPaginatedForAdmin(input: {
+    readonly page: number
+    readonly limit: number
+    readonly sort: 'createdAt' | 'adminScore' | 'ratingAverage' | 'voteShare' | 'qualityScore'
+    readonly order: 'asc' | 'desc'
+    readonly search?: string
+    readonly source?: 'human' | 'bot'
+    readonly hasAdminScore?: 'yes' | 'no'
+    readonly hasRating?: 'yes' | 'no'
+    readonly isSeed?: 'yes' | 'no'
+  }): Promise<{
+    readonly items: readonly JokeMemoryEntry[]
+    readonly total: number
+  }> {
+    const offset: number = Math.max(0, (input.page - 1) * input.limit)
+    const conditions: SQLWrapper[] = []
+    if (input.search && input.search.trim().length > 0) {
+      const term: string = `%${input.search.trim()}%`
+      const orExpr = or(ilike(jokeMemory.punchline, term), ilike(jokeMemory.prompt, term))
+      if (orExpr) {
+        conditions.push(orExpr)
+      }
+    }
+    if (input.source === 'human' || input.source === 'bot') {
+      conditions.push(eq(jokeMemory.source, input.source))
+    }
+    if (input.hasAdminScore === 'yes') {
+      conditions.push(isNotNull(jokeMemory.adminScore))
+    } else if (input.hasAdminScore === 'no') {
+      conditions.push(isNull(jokeMemory.adminScore))
+    }
+    if (input.hasRating === 'yes') {
+      conditions.push(gte(jokeMemory.ratingCount, 1))
+    } else if (input.hasRating === 'no') {
+      conditions.push(or(isNull(jokeMemory.ratingCount), eq(jokeMemory.ratingCount, 0)) as SQLWrapper)
+    }
+    if (input.isSeed === 'yes') {
+      conditions.push(eq(jokeMemory.isSeed, true))
+    } else if (input.isSeed === 'no') {
+      conditions.push(eq(jokeMemory.isSeed, false))
+    }
+    const whereExpr: SQL | undefined = conditions.length > 0 ? and(...conditions) : undefined
+
+    const orderDir = input.order === 'asc' ? asc : desc
+    let orderExpr: SQL
+    switch (input.sort) {
+      case 'adminScore':
+        orderExpr = orderDir(jokeMemory.adminScore)
+        break
+      case 'ratingAverage':
+        orderExpr = orderDir(jokeMemory.ratingAverage)
+        break
+      case 'voteShare':
+        orderExpr = orderDir(jokeMemory.voteShare)
+        break
+      case 'qualityScore':
+        orderExpr = orderDir(jokeMemory.qualityScore)
+        break
+      case 'createdAt':
+      default:
+        orderExpr = orderDir(jokeMemory.createdAt)
+        break
+    }
+
+    const [rows, totalRows] = await Promise.all([
+      this.db.select().from(jokeMemory).where(whereExpr).orderBy(orderExpr).limit(input.limit).offset(offset),
+      this.db.select({ value: count() }).from(jokeMemory).where(whereExpr)
+    ])
+    return {
+      items: rows.map((row) => this.toAdminEntry(row)),
+      total: totalRows[0]?.value ?? 0
+    }
+  }
+
+  public async findOneForAdmin(id: string): Promise<JokeMemoryEntry | null> {
+    const rows = await this.db.select().from(jokeMemory).where(eq(jokeMemory.id, id)).limit(1)
+    const row = rows[0]
+    return row ? this.toAdminEntry(row) : null
+  }
+
+  public async updateAdminFields(
+    id: string,
+    input: {
+      readonly adminScore?: number | null
+      readonly adminComment?: string | null
+      readonly adminScoredBy?: string
+    }
+  ): Promise<void> {
+    const set: Record<string, unknown> = {}
+    if (input.adminScore !== undefined) {
+      set.adminScore = input.adminScore
+      set.adminScoredAt = input.adminScore !== null ? new Date() : null
+      if (input.adminScoredBy !== undefined) {
+        set.adminScoredBy = input.adminScoredBy
+      }
+    }
+    if (input.adminComment !== undefined) {
+      set.adminComment = input.adminComment
+    }
+    if (Object.keys(set).length === 0) {
+      return
+    }
+    await this.db.update(jokeMemory).set(set).where(eq(jokeMemory.id, id))
+  }
+
+  public async deleteById(id: string): Promise<void> {
+    await this.db.delete(jokeMemory).where(eq(jokeMemory.id, id))
+  }
+
+  private toAdminEntry(row: typeof jokeMemory.$inferSelect): JokeMemoryEntry {
+    return {
+      id: row.id,
+      prompt: row.prompt,
+      punchline: row.punchline,
+      promptNormalized: row.promptNormalized,
+      fingerprint: row.fingerprint,
+      voteShare: row.voteShare,
+      qualityScore: row.qualityScore,
+      ratingAverage: row.ratingAverage ?? undefined,
+      ratingSum: row.ratingSum ?? undefined,
+      ratingCount: row.ratingCount ?? undefined,
+      votesFor: row.votesFor,
+      votesAgainst: row.votesAgainst,
+      adminScore: row.adminScore ?? undefined,
+      adminScoredBy: row.adminScoredBy ?? undefined,
+      adminScoredAt: row.adminScoredAt ?? undefined,
+      adminComment: row.adminComment ?? undefined,
+      usedAsExampleCount: row.usedAsExampleCount,
+      lastUsedAsExampleAt: row.lastUsedAsExampleAt ?? undefined,
+      authorUserId: row.authorUserId ?? undefined,
+      authorRealName: row.authorRealName ?? undefined,
+      source: row.source,
+      roomCode: row.roomCode,
+      roundIndex: row.roundIndex,
+      createdAt: row.createdAt
+    }
   }
 }

@@ -77,7 +77,7 @@ export class PromptStarterService implements OnModuleInit {
       limit,
       maxFeedbackScore: -0.5,
       maxAdminScore: 2,
-      minVotes: 3
+      minVotes: 2
     })
   }
 

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common'
-import { and, asc, count, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, notInArray, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm'
 import { DATABASE } from '../../db/db.module'
 import { promptStarters } from '../../db/schema/prompt-starter.schema'
 import {
@@ -128,12 +128,37 @@ export class PromptStarterRepository {
     readonly limit: number
     readonly sort: string
     readonly order: 'asc' | 'desc'
+    readonly search?: string
+    readonly hasAdminScore?: 'yes' | 'no'
+    readonly isSeed?: 'yes' | 'no'
+    readonly isGolden?: 'yes' | 'no'
   }): Promise<{ readonly items: readonly PromptStarterEntry[]; readonly total: number }> {
     const offset: number = (input.page - 1) * input.limit
     const completionsCountExpr =
       sql<number>`(SELECT COUNT(*)::int FROM ${promptStarterCompletions} WHERE ${promptStarterCompletions.promptStarterId} = ${promptStarters.id})`.as(
         'completions_count'
       )
+
+    const conditions: SQLWrapper[] = []
+    if (input.search && input.search.trim().length > 0) {
+      conditions.push(ilike(promptStarters.text, `%${input.search.trim()}%`))
+    }
+    if (input.hasAdminScore === 'yes') {
+      conditions.push(isNotNull(promptStarters.adminScore))
+    } else if (input.hasAdminScore === 'no') {
+      conditions.push(isNull(promptStarters.adminScore))
+    }
+    if (input.isSeed === 'yes') {
+      conditions.push(eq(promptStarters.isSeed, true))
+    } else if (input.isSeed === 'no') {
+      conditions.push(eq(promptStarters.isSeed, false))
+    }
+    if (input.isGolden === 'yes') {
+      conditions.push(eq(promptStarters.isGolden, true))
+    } else if (input.isGolden === 'no') {
+      conditions.push(eq(promptStarters.isGolden, false))
+    }
+    const whereExpr: SQL | undefined = conditions.length > 0 ? and(...conditions) : undefined
 
     const orderExpr: SQL = this.resolvePaginatedOrder(input.sort, input.order, completionsCountExpr)
 
@@ -145,14 +170,50 @@ export class PromptStarterRepository {
       .from(promptStarters)
 
     const [rows, totalRows] = await Promise.all([
-      baseSelect.orderBy(orderExpr).limit(input.limit).offset(offset),
-      this.db.select({ value: count() }).from(promptStarters)
+      baseSelect.where(whereExpr).orderBy(orderExpr).limit(input.limit).offset(offset),
+      this.db.select({ value: count() }).from(promptStarters).where(whereExpr)
     ])
 
     const ids = rows.map((entry) => entry.row.id)
     const completionsByPrompt = await this.loadCompletionsForPrompts(ids)
     const items = rows.map((entry) => this.toEntry(entry.row, completionsByPrompt.get(entry.row.id) ?? []))
     return { items, total: totalRows[0]?.value ?? 0 }
+  }
+
+  public async updateAdminFields(
+    id: string,
+    input: {
+      readonly text?: string
+      readonly adminScore?: number | null
+      readonly adminComment?: string | null
+      readonly adminScoredBy?: string
+      readonly isGolden?: boolean
+    }
+  ): Promise<void> {
+    const set: Record<string, unknown> = {}
+    if (input.text !== undefined) {
+      set.text = input.text
+    }
+    if (input.adminScore !== undefined) {
+      set.adminScore = input.adminScore
+      set.adminScoredAt = input.adminScore !== null ? new Date() : null
+      if (input.adminScoredBy !== undefined) {
+        set.adminScoredBy = input.adminScoredBy
+      }
+    }
+    if (input.adminComment !== undefined) {
+      set.adminComment = input.adminComment
+    }
+    if (input.isGolden !== undefined) {
+      set.isGolden = input.isGolden
+      if (input.isGolden) {
+        set.goldenSince = new Date()
+      }
+    }
+    if (Object.keys(set).length === 0) {
+      return
+    }
+    await this.db.update(promptStarters).set(set).where(eq(promptStarters.id, id))
   }
 
   public async findById(id: string): Promise<PromptStarterEntry | null> {

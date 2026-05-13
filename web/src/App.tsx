@@ -7,6 +7,7 @@ import type { RatingItem } from './models/rating-item.type'
 import { useGameClient } from './hooks/use-game-client'
 import { AuthView } from './views/AuthView'
 import { ProfileView } from './views/ProfileView'
+import { AdminView } from './admin/AdminView'
 
 type AppTheme = 'light' | 'gray' | 'dark'
 const THEMES: readonly AppTheme[] = ['light', 'gray', 'dark']
@@ -67,7 +68,7 @@ const getRoomCodeFromUrl = (): string | null => {
 
 function App(): ReactElement {
   const { user, token, status, logout } = useAuth()
-  const [view, setView] = useState<'game' | 'profile'>('game')
+  const [view, setView] = useState<'game' | 'profile' | 'admin'>('game')
   const [theme, setTheme] = useState<AppTheme>(getStoredTheme)
 
   useEffect(() => {
@@ -98,6 +99,7 @@ function App(): ReactElement {
   const [testMode, setTestMode] = useState<boolean>(false)
   const [answers, setAnswers] = useState<[string, string]>(['', ''])
   const [ratings, setRatings] = useState<Record<string, number>>({})
+  const [ratingsSubmittedLocally, setRatingsSubmittedLocally] = useState<boolean>(false)
   const [ratingFlashItemId, setRatingFlashItemId] = useState<string | null>(null)
   const [answersBtnPulse, setAnswersBtnPulse] = useState<boolean>(false)
   const [ratingsBtnPulse, setRatingsBtnPulse] = useState<boolean>(false)
@@ -210,8 +212,37 @@ function App(): ReactElement {
   useEffect(() => {
     if (gameState?.phase === 'rating') {
       setRatings({})
+      setRatingsSubmittedLocally(false)
     }
   }, [gameState?.phase, gameState?.roundIndex])
+
+  const flushRatings = useCallback((): void => {
+    if (!session || ratingsSubmittedLocally) {
+      return
+    }
+    executeSubmitRatings({
+      roomCode: session.roomCode,
+      ratings: buildRatingPayload(ratings)
+    })
+    setRatingsSubmittedLocally(true)
+  }, [executeSubmitRatings, ratings, ratingsSubmittedLocally, session])
+
+  useEffect(() => {
+    if (gameState?.phase && gameState.phase !== 'rating' && gameState.phase !== 'lobby' && !ratingsSubmittedLocally) {
+      flushRatings()
+    }
+  }, [gameState?.phase, flushRatings, ratingsSubmittedLocally])
+
+  useEffect(() => {
+    if (
+      gameState?.phase === 'rating' &&
+      !ratingsSubmittedLocally &&
+      localTimer != null &&
+      localTimer <= 2
+    ) {
+      flushRatings()
+    }
+  }, [localTimer, gameState?.phase, ratingsSubmittedLocally, flushRatings])
 
   const flushOpeningFeedback = useCallback((): void => {
     if (!session || openingFeedbackSent) {
@@ -267,7 +298,7 @@ function App(): ReactElement {
   }
 
   const handleSubmitRatings = (): void => {
-    if (!session || hasSubmittedRatings) {
+    if (!session || hasSubmittedRatings || ratingsSubmittedLocally) {
       return
     }
     setRatingsBtnPulse(true)
@@ -278,6 +309,7 @@ function App(): ReactElement {
       roomCode: session.roomCode,
       ratings: buildRatingPayload(ratings)
     })
+    setRatingsSubmittedLocally(true)
   }
 
   const handleVote = (side: 'left' | 'right'): void => {
@@ -350,6 +382,10 @@ function App(): ReactElement {
     return <ProfileView onBack={() => setView('game')} />
   }
 
+  if (view === 'admin') {
+    return <AdminView onBack={() => setView('game')} />
+  }
+
   if (!gameState || !session) {
     const hasRoomFromUrl = Boolean(getRoomCodeFromUrl())
     return (
@@ -367,6 +403,11 @@ function App(): ReactElement {
             <button type="button" className="secondary" onClick={() => setView('profile')}>
               Профиль
             </button>
+            {user.role === 'admin' && (
+              <button type="button" className="secondary" onClick={() => setView('admin')}>
+                Админка
+              </button>
+            )}
             <button type="button" className="secondary" onClick={logout}>
               Выйти
             </button>
