@@ -132,6 +132,8 @@ export class OpeningGeneratorAgentService {
     const lines: string[] = []
     if (input.previousRoundResults.length > 0) {
       lines.push('Результаты прошлого раунда:')
+      lines.push('Шкала: 👍 = активный лайк (хорошо, больше = лучше), 👎 = дизлайк (плохо), 🤢 = сломанная конструкция / не зашло вообще (плохо).')
+      lines.push('ВАЖНО: 👍0 НЕ означает «опенинг плохой». Это просто значит «никто не отметил активно как ВЫДАЮЩИЙСЯ» — он может быть вполне нормальным. Плохой — это только если есть 👎 или 🤢. Не избегай опенингов с 👍0 — избегай только тех у кого есть 👎/🤢.')
       for (const result of input.previousRoundResults) {
         const feedbackBits: string[] = [
           `👍${result.feedback.up}`,
