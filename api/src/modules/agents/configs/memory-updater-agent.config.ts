@@ -3,16 +3,14 @@ import { AgentConfig } from '../../claude-agent/models/agent-config.type'
 import { MemoryUpdaterOutput } from '../memory-updater/models/user-memory-delta.type'
 
 export const MEMORY_UPDATER_SYSTEM_PROMPT: string = [
-  'КРИТИЧНО — формат ответа: никаких размышлений, никаких объяснений, никакого свободного текста. Сразу JSON и ничего больше.',
-  '',
   'Ты — обновлятор памяти игроков для тёмной комедийной party-игры.',
   'После каждого раунда тебе показывают что произошло: какие шутки, кто как голосовал, какие рейтинги.',
   'Твоя задача — обновить долговременную память каждого игрока строго по фактам, без догадок.',
   '',
   'Что обновляешь:',
-  '- themes: темы, которые игрок поднимает / на которые реагирует. confidence растёт МЕДЛЕННО — тема становится stable после 3+ упоминаний. Не добавляй тему по одной шутке.',
-  '- voterPreferences { darkPreference, callbackPreference, absurdPreference, ironyPreference } — каждое число в [-1, 1]. Двигай маленькими шагами (±0.05-0.15), только если паттерн голосования игрока в этом раунде явно показывает направление.',
-  '- authorStyle { avgPunchlineLength, preferredStructures } — обнови если игрок написал хотя бы 1 шутку в этом раунде. Считай длину как число слов.',
+  '- themesDelta: темы которые игрок поднимает или на которые реагирует. confidence растёт МЕДЛЕННО — тема становится stable после 3+ упоминаний. Не добавляй тему по одной шутке.',
+  '- voterPreferencesDelta — двигай маленькими шагами (±0.05-0.15), только если паттерн голосования игрока в этом раунде явно показывает направление.',
+  '- authorStyleDelta — обнови если игрок написал хотя бы 1 шутку в этом раунде. avgPunchlineLength считай как число слов.',
   '- newPortrait — короткое описание игрока на 3-5 предложений (на русском). Обновляй когда есть новое наблюдение. Без диагнозов, без оценочных суждений — описывай поведение, а не личность.',
   '',
   'ПРАВИЛА:',
@@ -21,42 +19,7 @@ export const MEMORY_UPDATER_SYSTEM_PROMPT: string = [
   '- Если для игрока в этом раунде нет НИЧЕГО нового — не включай его в updates.',
   '- Дельты — это только ИЗМЕНЕНИЯ. Не возвращай поля которые не меняются.',
   '',
-  'Output: ВСЕГДА JSON-объект формы {"updates": { <userId>: { ...опциональные дельты... } }}. Без markdown fences, без объяснений, без других ключей.',
-  '',
-  'ТОЧНЫЙ ФОРМАТ — копируй имена полей буква-в-букву, не сокращай:',
-  '```',
-  '{',
-  '  "updates": {',
-  '    "<userId-uuid>": {',
-  '      "themesDelta": [',
-  '        { "theme": "тёмный юмор", "confidenceDelta": 0.1, "mentionsDelta": 1, "source": "derived" }',
-  '      ],',
-  '      "voterPreferencesDelta": {',
-  '        "darkPreference": 0.05,',
-  '        "callbackPreference": -0.03,',
-  '        "absurdPreference": 0.1,',
-  '        "ironyPreference": 0',
-  '      },',
-  '      "authorStyleDelta": {',
-  '        "avgPunchlineLength": 5.5,',
-  '        "preferredStructures": ["short_punch", "callback"]',
-  '      },',
-  '      "newPortrait": "Игрок предпочитает короткие провокационные панчлайны..."',
-  '    }',
-  '  }',
-  '}',
-  '```',
-  '',
-  'ВНИМАНИЕ — частые ошибки которые ты НЕ ДОЛЖЕН делать:',
-  '- НЕ "dark" — пиши "darkPreference"',
-  '- НЕ "irony" — пиши "ironyPreference"',
-  '- НЕ "callback" — пиши "callbackPreference"',
-  '- НЕ "absurd" — пиши "absurdPreference"',
-  '- НЕ "avgLen" — пиши "avgPunchlineLength"',
-  '- НЕ "structures" — пиши "preferredStructures"',
-  '- НЕ "themes" — пиши "themesDelta" (это массив объектов, не массив строк)',
-  '',
-  'ПОВТОРНО — твой ответ это ОДИН JSON-объект и НИЧЕГО больше. Если ты собираешься написать "Анализирую..." или "Voting reconstruction:" — НЕ ПИШИ. Сразу JSON.'
+  'Output: JSON-объект формы {"updates": { <userId>: { ...опциональные дельты... } }}. Структура форсируется через JSON Schema, отвечай строго по ней.'
 ].join('\n')
 
 const themeDeltaSchema = z.object({
@@ -102,5 +65,7 @@ export const MEMORY_UPDATER_AGENT_CONFIG: AgentConfig<MemoryUpdaterOutput> = {
   schema: MEMORY_UPDATER_OUTPUT_SCHEMA,
   model: 'sonnet',
   retries: 1,
-  timeoutMs: 180000
+  timeoutMs: 180000,
+  effort: 'low',
+  useJsonSchema: true
 }

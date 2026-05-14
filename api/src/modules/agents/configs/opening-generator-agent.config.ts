@@ -87,5 +87,6 @@ export const OPENING_GENERATOR_AGENT_CONFIG: AgentConfig<readonly string[]> = {
   schema: OPENINGS_ARRAY_SCHEMA,
   model: 'sonnet',
   retries: 1,
-  timeoutMs: 120000
+  timeoutMs: 120000,
+  effort: 'low'
 }

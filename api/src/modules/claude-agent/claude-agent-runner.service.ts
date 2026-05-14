@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { copyFile, mkdir, rm, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { z } from 'zod'
 import { AgentConfig } from './models/agent-config.type'
 import {
   AgentInvocationError,
@@ -34,6 +35,7 @@ type ClaudeCliJsonResult = {
   readonly stop_reason: string
   readonly session_id: string
   readonly total_cost_usd: number
+  readonly structured_output?: unknown
   readonly usage: {
     readonly input_tokens: number
     readonly output_tokens: number
@@ -255,10 +257,7 @@ export class ClaudeAgentRunnerService {
             cacheReadTokens: cliResult.usage.cache_read_input_tokens,
             cacheCreationTokens: cliResult.usage.cache_creation_input_tokens
           }
-          const parsed: T | undefined =
-            config.outputFormat === 'json' && config.schema
-              ? this.parseAgentJson(config, cliResult.result)
-              : undefined
+          const parsed: T | undefined = this.extractParsed(config, cliResult)
           const response: AgentResponse<T> = {
             raw: cliResult.result,
             parsed,
@@ -302,6 +301,16 @@ export class ClaudeAgentRunnerService {
       '--model',
       config.model
     ]
+    if (config.effort) {
+      args.push('--effort', config.effort)
+    }
+    if (config.fallbackModel) {
+      args.push('--fallback-model', config.fallbackModel)
+    }
+    if (config.useJsonSchema && config.schema && config.outputFormat === 'json') {
+      const jsonSchema: unknown = z.toJSONSchema(config.schema)
+      args.push('--json-schema', JSON.stringify(jsonSchema))
+    }
     if (mode.kind === 'start') {
       args.push('--session-id', mode.sessionId)
       args.push('--system-prompt', config.systemPrompt)
@@ -325,6 +334,26 @@ export class ClaudeAgentRunnerService {
         error as Error
       )
     }
+  }
+
+  private extractParsed<T>(
+    config: AgentConfig<T>,
+    cliResult: ClaudeCliJsonResult
+  ): T | undefined {
+    if (config.outputFormat !== 'json' || !config.schema) {
+      return undefined
+    }
+    if (config.useJsonSchema && cliResult.structured_output !== undefined) {
+      const validated = config.schema.safeParse(cliResult.structured_output)
+      if (!validated.success) {
+        throw new AgentParseError(
+          `Agent "${config.name}" structured_output failed schema: ${validated.error.message}`,
+          JSON.stringify(cliResult.structured_output)
+        )
+      }
+      return validated.data
+    }
+    return this.parseAgentJson(config, cliResult.result)
   }
 
   private parseAgentJson<T>(config: AgentConfig<T>, raw: string): T {

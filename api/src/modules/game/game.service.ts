@@ -1426,7 +1426,19 @@ export class GameService {
       const hasHighRating = ratingsFromCompletions.some((r) => r >= 8)
       const completionCount = completions.length
 
-      const isGolden = completionCount >= 2 && hasHighRating && (avgRating >= 7.0 || avgVoteShare >= 0.65)
+      // Block golden if players downvoted the opening itself —
+      // otherwise the same opening can land in both positives and AVOID list.
+      const openingFeedback = await this.promptStarterService.findByText(prompt)
+      const negativeFeedback =
+        openingFeedback !== null
+        && openingFeedback.userQuickFeedback.count >= 2
+        && openingFeedback.feedbackScore <= -0.25
+
+      const isGolden =
+        completionCount >= 2
+        && hasHighRating
+        && (avgRating >= 7.0 || avgVoteShare >= 0.65)
+        && !negativeFeedback
 
       if (isGolden) {
         await this.promptStarterService.saveGoldenOpening({

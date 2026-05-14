@@ -143,6 +143,10 @@ body {
   padding: 24px;
 }
 
+.layout.wide {
+  place-items: start center;
+}
+
 .panel {
   width: min(760px, 100%);
   background: var(--panel);
@@ -153,6 +157,132 @@ body {
   gap: 16px;
   box-shadow: var(--panel-shadow);
   transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.panel.wide {
+  width: min(1400px, 100%);
+}
+
+.adminChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+
+.adminChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.adminChip.golden {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.adminChip.positive {
+  background: rgba(46, 160, 67, 0.1);
+  border-color: rgba(46, 160, 67, 0.3);
+  color: var(--confirm-text);
+}
+
+.adminChip.negative {
+  background: rgba(229, 62, 62, 0.1);
+  border-color: rgba(229, 62, 62, 0.3);
+  color: var(--error);
+}
+
+.adminChip.muted {
+  opacity: 0.6;
+}
+
+.adminChip strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.scoreScale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.scoreScale button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scoreScale button:hover:not(.active) {
+  background: var(--secondary-hover);
+  color: var(--text);
+}
+
+.scoreScale button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.scoreScale button.clear {
+  width: auto;
+  padding: 0 10px;
+  color: var(--text-secondary);
+}
+
+.scoreScale .scoreDivider {
+  width: 1px;
+  height: 24px;
+  background: var(--divider);
+  margin: 0 4px;
+}
+
+.completionsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--card-bg);
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+}
+
+.completionItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--panel);
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+}
+
+.completionItem .completionText {
+  font-weight: 500;
+  color: var(--text);
 }
 
 h1 {

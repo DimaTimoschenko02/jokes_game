@@ -116,12 +116,26 @@ export class AdminController {
 
   @Get('prompts/:id')
   @UseGuards(AdminGuard)
-  public async getPrompt(@Param('id') id: string): Promise<PromptStarterEntry | { error: string }> {
+  public async getPrompt(@Param('id') id: string): Promise<Record<string, unknown> | { error: string }> {
     const doc = await this.promptRepository.findById(id)
     if (!doc) {
       return { error: 'Not found' }
     }
-    return doc
+    return {
+      ...this.serializePrompt(doc),
+      completions: doc.completions.map((c) => ({
+        punchline: c.punchline,
+        source: c.source,
+        votesFor: c.votesFor,
+        votesAgainst: c.votesAgainst,
+        voteShare: c.voteShare,
+        ratingAverage: c.ratingAverage ?? null,
+        ratingCount: c.ratingCount ?? null,
+        roomCode: c.roomCode,
+        roundIndex: c.roundIndex,
+        createdAt: c.createdAt
+      }))
+    }
   }
 
   @Patch('prompts/:id')

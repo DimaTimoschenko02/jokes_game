@@ -51,5 +51,6 @@ export const BOT_AGENT_CONFIG: AgentConfig<never> = {
   outputFormat: 'text',
   model: 'sonnet',
   retries: 1,
-  timeoutMs: 90000
+  timeoutMs: 90000,
+  effort: 'low'
 }

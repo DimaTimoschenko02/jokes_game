@@ -230,6 +230,20 @@ export class PromptStarterRepository {
     return this.toEntry(row, completionsByPrompt.get(id) ?? [])
   }
 
+  public async findByText(text: string): Promise<PromptStarterEntry | null> {
+    const rows = await this.db
+      .select()
+      .from(promptStarters)
+      .where(eq(promptStarters.text, text))
+      .limit(1)
+    const row = rows[0]
+    if (!row) {
+      return null
+    }
+    const completionsByPrompt = await this.loadCompletionsForPrompts([row.id])
+    return this.toEntry(row, completionsByPrompt.get(row.id) ?? [])
+  }
+
   public async updateText(id: string, text: string): Promise<void> {
     await this.db.update(promptStarters).set({ text }).where(eq(promptStarters.id, id))
   }

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ReactElement } from 'react'
+import type { ReactElement, ReactNode } from 'react'
 import { useAuth } from '../auth/auth-context'
 import {
   adminApi,
   type JokeListItem,
   type ListJokesQuery,
   type ListPromptsQuery,
+  type PromptDetail,
   type PromptListItem,
   type SourceFilter,
   type YesNoFilter
@@ -44,6 +45,8 @@ const SOURCE_LABELS: Record<SourceFilter, string> = {
   bot: 'Боты'
 }
 
+const SCORE_VALUES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
 export function AdminView({ onBack }: { readonly onBack: () => void }): ReactElement {
   const { user, token } = useAuth()
   const [tab, setTab] = useState<AdminTab>('prompts')
@@ -71,8 +74,8 @@ export function AdminView({ onBack }: { readonly onBack: () => void }): ReactEle
   }
 
   return (
-    <main className="layout">
-      <section className="panel">
+    <main className="layout wide">
+      <section className="panel wide">
         <div className="header">
           <h1>Админка</h1>
           <button type="button" className="secondary" onClick={onBack}>← Назад</button>
@@ -174,7 +177,7 @@ function PromptsTab({ token }: { readonly token: string }): ReactElement {
       <p className="subtitle">{total} всего, страница {query.page ?? 1} из {totalPages}</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
         {items.map((item) => (
-          <PromptRow key={item.id} item={item} onSave={onSave} onDelete={onDelete} />
+          <PromptRow key={item.id} item={item} token={token} onSave={onSave} onDelete={onDelete} />
         ))}
       </div>
       <Pagination
@@ -419,50 +422,127 @@ function Pagination({
   )
 }
 
+function ScoreScale({
+  value,
+  onChange
+}: {
+  readonly value: number | null
+  readonly onChange: (next: number | null) => void
+}): ReactElement {
+  return (
+    <div className="scoreScale">
+      {SCORE_VALUES.map((n) => (
+        <button
+          key={n}
+          type="button"
+          className={value === n ? 'active' : ''}
+          onClick={() => onChange(n)}
+        >
+          {n}
+        </button>
+      ))}
+      <div className="scoreDivider" />
+      <button
+        type="button"
+        className="clear"
+        onClick={() => onChange(null)}
+        disabled={value === null}
+      >
+        Убрать
+      </button>
+    </div>
+  )
+}
+
+function Chip({
+  children,
+  tone
+}: {
+  readonly children: ReactNode
+  readonly tone?: 'golden' | 'positive' | 'negative' | 'muted'
+}): ReactElement {
+  const cls = tone ? `adminChip ${tone}` : 'adminChip'
+  return <span className={cls}>{children}</span>
+}
+
 function PromptRow({
   item,
+  token,
   onSave,
   onDelete
 }: {
   readonly item: PromptListItem
+  readonly token: string
   readonly onSave: (id: string, body: { adminScore?: number | null; adminComment?: string | null; isGolden?: boolean }) => Promise<void>
   readonly onDelete: (id: string) => Promise<void>
 }): ReactElement {
   const [editing, setEditing] = useState<boolean>(false)
-  const [adminScore, setAdminScore] = useState<string>(item.adminScore?.toString() ?? '')
+  const [adminScore, setAdminScore] = useState<number | null>(item.adminScore ?? null)
   const [adminComment, setAdminComment] = useState<string>(item.adminComment ?? '')
   const [isGolden, setIsGolden] = useState<boolean>(item.isGolden)
+  const [expanded, setExpanded] = useState<boolean>(false)
+  const [detail, setDetail] = useState<PromptDetail | null>(null)
+  const [loadingDetail, setLoadingDetail] = useState<boolean>(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+
+  const onToggleExpand = async (): Promise<void> => {
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+    setExpanded(true)
+    if (detail !== null) {
+      return
+    }
+    setLoadingDetail(true)
+    setDetailError(null)
+    try {
+      const d = await adminApi.getPrompt(token, item.id)
+      setDetail(d)
+    } catch (e) {
+      setDetailError((e as Error).message)
+    } finally {
+      setLoadingDetail(false)
+    }
+  }
+
+  const feedbackTone: 'positive' | 'negative' | 'muted' =
+    item.feedbackCount === 0 ? 'muted' : item.feedbackScore > 0 ? 'positive' : item.feedbackScore < 0 ? 'negative' : 'muted'
 
   return (
     <div className="phaseBlock">
       <p style={{ fontSize: '1.05em', margin: '0 0 6px 0' }}>{item.text}</p>
-      <p className="subtitle">
-        {item.isGolden && <span style={{ color: '#f59e0b' }}>★ GOLDEN </span>}
-        admin: {item.adminScore ?? '—'} | feedback: {item.feedbackScore.toFixed(2)} ({item.feedbackCount} голосов) | использовано: {item.usedCount} | в примерах: {item.usedAsExampleCount}
-      </p>
-      {item.adminComment && <p className="subtitle">Коммент: {item.adminComment}</p>}
+      <div className="adminChips">
+        {item.isGolden && <Chip tone="golden">★ GOLDEN</Chip>}
+        <Chip tone={item.adminScore !== null ? (item.adminScore >= 7 ? 'positive' : item.adminScore <= 3 ? 'negative' : undefined) : 'muted'}>
+          admin: <strong>{item.adminScore ?? '—'}</strong>
+        </Chip>
+        <Chip tone={feedbackTone}>
+          feedback: <strong>{item.feedbackScore.toFixed(2)}</strong> ({item.feedbackCount})
+        </Chip>
+        <Chip>использовано: <strong>{item.usedCount}</strong></Chip>
+        <Chip>шуток: <strong>{item.completionsCount}</strong></Chip>
+        <Chip>в примерах: <strong>{item.usedAsExampleCount}</strong></Chip>
+        {item.avgVoteShare !== null && (
+          <Chip>дуэли: <strong>{(item.avgVoteShare * 100).toFixed(0)}%</strong></Chip>
+        )}
+      </div>
+      {item.adminComment && <p className="subtitle" style={{ marginTop: 6 }}>Коммент: {item.adminComment}</p>}
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
-          <div className="row">
-            <label className="inputGroup" style={{ flex: 1 }}>
-              <span>Admin score (1-10, пусто = убрать)</span>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={adminScore}
-                onChange={(e) => setAdminScore(e.target.value)}
-              />
-            </label>
-            <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <input
-                type="checkbox"
-                checked={isGolden}
-                onChange={(e) => setIsGolden(e.target.checked)}
-              />
-              <span>Golden</span>
-            </label>
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+          <label className="inputGroup">
+            <span>Admin score (1–10)</span>
+            <ScoreScale value={adminScore} onChange={setAdminScore} />
+          </label>
+          <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
+            <input
+              type="checkbox"
+              style={{ width: 'auto' }}
+              checked={isGolden}
+              onChange={(e) => setIsGolden(e.target.checked)}
+            />
+            <span>Golden</span>
+          </label>
           <textarea
             value={adminComment}
             placeholder="Комментарий (опционально)"
@@ -472,9 +552,8 @@ function PromptRow({
             <button
               className="primary"
               onClick={async () => {
-                const score: number | null = adminScore.trim().length > 0 ? Number(adminScore) : null
                 await onSave(item.id, {
-                  adminScore: score,
+                  adminScore,
                   adminComment: adminComment.trim().length > 0 ? adminComment : null,
                   isGolden
                 })
@@ -487,9 +566,36 @@ function PromptRow({
           </div>
         </div>
       ) : (
-        <div className="row">
+        <div className="row" style={{ marginTop: 10, gridTemplateColumns: 'auto auto auto 1fr' }}>
           <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
+          <button className="secondary" onClick={onToggleExpand}>
+            {expanded ? '▲ Скрыть шутки' : `▼ Шутки (${item.completionsCount})`}
+          </button>
           <button className="secondary" onClick={() => onDelete(item.id)}>Delete</button>
+          <div />
+        </div>
+      )}
+      {expanded && (
+        <div className="completionsList">
+          {loadingDetail && <p className="subtitle">Загрузка...</p>}
+          {detailError && <p className="errorText">{detailError}</p>}
+          {detail && detail.completions.length === 0 && <p className="subtitle">Нет шуток</p>}
+          {detail && detail.completions.length > 0 && detail.completions.map((c, idx) => (
+            <div key={idx} className="completionItem">
+              <span className="completionText">→ {c.punchline}</span>
+              <div className="adminChips">
+                <Chip>{c.source === 'bot' ? '🤖 bot' : '👤 человек'}</Chip>
+                {c.ratingAverage !== undefined && c.ratingAverage !== null && (
+                  <Chip tone={c.ratingAverage >= 7 ? 'positive' : c.ratingAverage <= 4 ? 'negative' : undefined}>
+                    rating: <strong>{c.ratingAverage.toFixed(2)}</strong> ({c.ratingCount ?? 0})
+                  </Chip>
+                )}
+                <Chip>дуэли: <strong>{c.votesFor}↑/{c.votesAgainst}↓</strong> ({(c.voteShare * 100).toFixed(0)}%)</Chip>
+                <Chip>комната: <strong>{c.roomCode}</strong></Chip>
+                <Chip>раунд: <strong>{c.roundIndex + 1}</strong></Chip>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -506,28 +612,32 @@ function JokeRow({
   readonly onDelete: (id: string) => Promise<void>
 }): ReactElement {
   const [editing, setEditing] = useState<boolean>(false)
-  const [adminScore, setAdminScore] = useState<string>(item.adminScore?.toString() ?? '')
+  const [adminScore, setAdminScore] = useState<number | null>(item.adminScore ?? null)
   const [adminComment, setAdminComment] = useState<string>(item.adminComment ?? '')
 
   return (
     <div className="phaseBlock">
       <p className="subtitle">Setup: {item.prompt}</p>
       <p style={{ fontSize: '1.05em', fontWeight: 600, margin: '0 0 6px 0' }}>→ {item.punchline}</p>
-      <p className="subtitle">
-        {item.source === 'bot' ? '🤖 bot' : `👤 ${item.authorRealName ?? '?'}`} | admin: {item.adminScore ?? '—'} | rating: {item.ratingAverage?.toFixed(2) ?? '—'} ({item.ratingCount ?? 0}) | дуэли: {item.votesFor}↑/{item.votesAgainst}↓ ({(item.voteShare * 100).toFixed(0)}%) | в примерах: {item.usedAsExampleCount}
-      </p>
-      {item.adminComment && <p className="subtitle">Коммент: {item.adminComment}</p>}
+      <div className="adminChips">
+        <Chip>{item.source === 'bot' ? '🤖 bot' : `👤 ${item.authorRealName ?? '?'}`}</Chip>
+        <Chip tone={item.adminScore !== null ? (item.adminScore >= 7 ? 'positive' : item.adminScore <= 3 ? 'negative' : undefined) : 'muted'}>
+          admin: <strong>{item.adminScore ?? '—'}</strong>
+        </Chip>
+        <Chip tone={item.ratingAverage !== null ? (item.ratingAverage >= 7 ? 'positive' : item.ratingAverage <= 4 ? 'negative' : undefined) : 'muted'}>
+          rating: <strong>{item.ratingAverage?.toFixed(2) ?? '—'}</strong> ({item.ratingCount ?? 0})
+        </Chip>
+        <Chip>дуэли: <strong>{item.votesFor}↑/{item.votesAgainst}↓</strong> ({(item.voteShare * 100).toFixed(0)}%)</Chip>
+        <Chip>quality: <strong>{item.qualityScore.toFixed(2)}</strong></Chip>
+        <Chip>в примерах: <strong>{item.usedAsExampleCount}</strong></Chip>
+        <Chip>комната: <strong>{item.roomCode}</strong></Chip>
+      </div>
+      {item.adminComment && <p className="subtitle" style={{ marginTop: 6 }}>Коммент: {item.adminComment}</p>}
       {editing ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
           <label className="inputGroup">
-            <span>Admin score (1-10, пусто = убрать)</span>
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={adminScore}
-              onChange={(e) => setAdminScore(e.target.value)}
-            />
+            <span>Admin score (1–10)</span>
+            <ScoreScale value={adminScore} onChange={setAdminScore} />
           </label>
           <textarea
             value={adminComment}
@@ -538,9 +648,8 @@ function JokeRow({
             <button
               className="primary"
               onClick={async () => {
-                const score: number | null = adminScore.trim().length > 0 ? Number(adminScore) : null
                 await onSave(item.id, {
-                  adminScore: score,
+                  adminScore,
                   adminComment: adminComment.trim().length > 0 ? adminComment : null
                 })
                 setEditing(false)
@@ -552,7 +661,7 @@ function JokeRow({
           </div>
         </div>
       ) : (
-        <div className="row">
+        <div className="row" style={{ marginTop: 10 }}>
           <button className="secondary" onClick={() => setEditing(true)}>Edit</button>
           <button className="secondary" onClick={() => onDelete(item.id)}>Delete</button>
         </div>

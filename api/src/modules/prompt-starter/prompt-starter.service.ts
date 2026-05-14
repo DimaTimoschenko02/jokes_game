@@ -85,6 +85,10 @@ export class PromptStarterService implements OnModuleInit {
     return this.repository.findBestCompletions({ promptText, limit: 20, minVoteShare: 0 })
   }
 
+  public async findByText(text: string): Promise<import('./models/prompt-starter-entry.type').PromptStarterEntry | null> {
+    return this.repository.findByText(text)
+  }
+
   public async saveGoldenOpening(input: {
     readonly text: string
     readonly averageCompletionRating: number
