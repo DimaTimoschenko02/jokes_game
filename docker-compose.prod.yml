@@ -1,12 +1,21 @@
 services:
-  mongo:
-    image: mongo:7
-    container_name: punchme-mongo
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: punchme-postgres
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: punchme
+      POSTGRES_PASSWORD: punchme
+      POSTGRES_DB: punchme
     ports:
-      - '127.0.0.1:27017:27017'
+      - '127.0.0.1:5432:5432'
     volumes:
-      - punchme-mongo-data:/data/db
+      - punchme-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U punchme -d punchme']
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
-  punchme-mongo-data:
+  punchme-postgres-data:
