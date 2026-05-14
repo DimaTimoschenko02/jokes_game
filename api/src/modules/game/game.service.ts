@@ -359,13 +359,15 @@ export class GameService {
     let raw: readonly string[]
     if (!room.sessions.openingGenerator) {
       const players = this.buildOpeningPlayerProfiles(room)
-      const [golden, negative] = await Promise.all([
-        this.promptStarterService.getGoldenExamplesDetailed(10),
+      const [golden, medium, negative] = await Promise.all([
+        this.promptStarterService.getGoldenExamplesDetailed(5),
+        this.promptStarterService.getMediumOpeningExamples(5),
         this.promptStarterService.getNegativeOpeningExamples(5) as Promise<readonly NegativeOpeningExample[]>
       ])
       const result = await this.openingGeneratorAgent.startForRoom(room.code, {
         players,
         golden,
+        medium,
         negative,
         needed
       })

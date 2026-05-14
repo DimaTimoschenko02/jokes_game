@@ -77,6 +77,17 @@ export class PromptStarterService {
     })
   }
 
+  public async getMediumOpeningExamples(
+    limit: number
+  ): Promise<readonly { readonly text: string; readonly score: number }[]> {
+    return this.repository.findMediumRatedOpenings({
+      limit,
+      minFeedbackScore: -0.5,
+      maxFeedbackScore: 0.5,
+      minVotes: 1
+    })
+  }
+
   public async getCompletionsForPrompt(promptText: string): Promise<readonly import('./models/prompt-starter-entry.type').PromptCompletion[]> {
     return this.repository.findBestCompletions({ promptText, limit: 20, minVoteShare: 0 })
   }

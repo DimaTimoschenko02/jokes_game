@@ -413,6 +413,33 @@ export class PromptStarterRepository {
     }))
   }
 
+  public async findMediumRatedOpenings(input: {
+    readonly limit: number
+    readonly minFeedbackScore: number
+    readonly maxFeedbackScore: number
+    readonly minVotes: number
+  }): Promise<readonly { readonly text: string; readonly score: number }[]> {
+    const rows = await this.db
+      .select({
+        text: promptStarters.text,
+        feedbackScore: promptStarters.feedbackScore,
+        adminScore: promptStarters.adminScore
+      })
+      .from(promptStarters)
+      .where(
+        sql`${promptStarters.isGolden} = false
+            AND ${promptStarters.feedbackCount} >= ${input.minVotes}
+            AND ${promptStarters.feedbackScore} > ${input.minFeedbackScore}
+            AND ${promptStarters.feedbackScore} < ${input.maxFeedbackScore}`
+      )
+      .orderBy(sql`random()`)
+      .limit(input.limit)
+    return rows.map((row) => ({
+      text: row.text,
+      score: row.adminScore ?? row.feedbackScore
+    }))
+  }
+
   public async findMaxSimilarityToHistory(embedding: readonly number[]): Promise<number> {
     if (embedding.length === 0) {
       return 0

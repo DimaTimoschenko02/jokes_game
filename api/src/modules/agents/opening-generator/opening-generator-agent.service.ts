@@ -18,6 +18,11 @@ export type GoldenOpeningExample = {
   readonly score: number
 }
 
+export type MediumOpeningExample = {
+  readonly text: string
+  readonly score: number
+}
+
 export type NegativeOpeningExample = {
   readonly text: string
   readonly score: number
@@ -33,6 +38,7 @@ export type RoundResultForOpening = {
 export type StartOpeningGeneratorInput = {
   readonly players: readonly OpeningPlayerProfile[]
   readonly golden: readonly GoldenOpeningExample[]
+  readonly medium: readonly MediumOpeningExample[]
   readonly negative: readonly NegativeOpeningExample[]
   readonly needed: number
 }
@@ -91,8 +97,15 @@ export class OpeningGeneratorAgentService {
     }
     lines.push('')
     if (input.golden.length > 0) {
-      lines.push('Эти opening\'и приводили к самым весёлым играм раньше — стремись к этому уровню:')
+      lines.push('GOLDEN — opening\'и, которые залетали лучше всего. Пиши в этом духе, повторяй их структуру и тёмность:')
       for (const example of input.golden) {
+        lines.push(`- "${example.text}" [score: ${example.score.toFixed(2)}]`)
+      }
+      lines.push('')
+    }
+    if (input.medium.length > 0) {
+      lines.push('СРЕДНИЕ — приемлемо, но не вау. Целься выше:')
+      for (const example of input.medium) {
         lines.push(`- "${example.text}" [score: ${example.score.toFixed(2)}]`)
       }
       lines.push('')
@@ -132,11 +145,11 @@ export class OpeningGeneratorAgentService {
       }
       lines.push('')
       lines.push('Анализ перед генерацией:')
-      lines.push('1. Среди успешных опенингов прошлого раунда — какой ТИП setup\'а (см. список типов в системном промпте) сработал?')
-      lines.push('2. Какие ТЕМЫ зашли? Не повторяй их буквально, но переноси саму идею в новые сцены.')
-      lines.push('3. Если 👎/🤢 — это сигнал что паттерн или тема устали. Не повторяй именно ЭТО, но не избегай связанной области целиком.')
+      lines.push('1. Среди успешных опенингов прошлого раунда — какой ТИП setup\'а (см. список типов в системном промпте) сработал? ПОВТОРИ этот тип, но с новой темой/персонажем — рабочая формула это актив, а не запрет.')
+      lines.push('2. Какие ТЕМЫ зашли? Темы можно держать в той же зоне (секс/война/смерть/абсурд — что лайкнули), меняй СЦЕНУ и УГОЛ, не саму зону.')
+      lines.push('3. Если 👎/🤢 — слабым был именно ТОТ конкретный текст. Не копируй его дословно, но связанную тему/тип setup\'а трогать можно — попробуй другую сцену в той же области.')
       lines.push('')
-      lines.push('ВАЖНО: не зацикливайся. Если игрокам зашёл секс — это НЕ значит писать 3 секс-опенинга подряд. Возьми ОДНУ удачную идею и встрой в 1 опенинг, остальное про разное.')
+      lines.push('ВАЖНО: golden\'ы и удачные опенинги — это твой ориентир. Не пытайся искусственно «разнообразить» если рабочий стиль уже найден. Лучше 4 опенинга в найденном духе чем 4 разных но средних.')
       lines.push('')
     }
     if (input.excludedOpenings.length > 0) {
