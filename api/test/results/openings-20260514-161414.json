@@ -1,0 +1,148 @@
+{
+  "count": 10,
+  "results": [
+    {
+      "combo": {
+        "model": "claude-sonnet-4-6",
+        "effort": "medium",
+        "label": "sonnet-4-6 / med"
+      },
+      "latencyMs": 75589,
+      "costUsd": 0.1608584,
+      "inputTokens": 6,
+      "outputTokens": 5276,
+      "cacheReadTokens": 32588,
+      "cacheCreationTokens": 19044,
+      "rawResult": "There's one untracked file: `test/benchmark-claude-openings.ts`. Should I commit and push it?\n\nA few options:\n1. **Commit & push** — if this file is intentional and should be tracked\n2. **Add to `.gitignore`** — if it's a throwaway test script that shouldn't be committed\n3. **Leave it** — if you want to handle it yourself\n\nWhat would you like to do?",
+      "openings": [
+        "There's one untracked file: `test/benchmark-claude-openings.ts`. Should I commit and push it?",
+        "A few options:",
+        "Commit & push** — if this file is intentional and should be tracked",
+        "Add to `.gitignore`** — if it's a throwaway test script that shouldn't be committed",
+        "Leave it** — if you want to handle it yourself",
+        "What would you like to do?"
+      ],
+      "parseStatus": "partial",
+      "error": null
+    },
+    {
+      "combo": {
+        "model": "claude-sonnet-4-6",
+        "effort": "high",
+        "label": "sonnet-4-6 / high"
+      },
+      "latencyMs": 216689,
+      "costUsd": 0.31296290000000004,
+      "inputTokens": 10,
+      "outputTokens": 12484,
+      "cacheReadTokens": 163788,
+      "cacheCreationTokens": 20278,
+      "rawResult": "The untracked file is `test/benchmark-claude-openings.ts` — a benchmarking script that compares Claude models (sonnet-4-6, opus-4-6, opus-4-7) × effort levels on joke opening generation, saving results to JSON + Markdown reports.\n\nI tried to stage and commit it but hit a permissions gate. You'll need to approve (or run manually):\n\n```bash\ngit add test/benchmark-claude-openings.ts\ngit commit -m \"test: add Claude model × effort benchmark for joke opening generation\"\ngit push\n```\n\nOr if you want me to proceed — just approve the `git add` prompt and I'll handle the rest.",
+      "openings": [
+        "I tried to stage and commit it but hit a permissions gate. You'll need to approve (or run manually):",
+        "```bash",
+        "git add test/benchmark-claude-openings.ts",
+        "git commit -m \"test: add Claude model × effort benchmark for joke opening generation\"",
+        "git push",
+        "Or if you want me to proceed — just approve the `git add` prompt and I'll handle the rest."
+      ],
+      "parseStatus": "partial",
+      "error": null
+    },
+    {
+      "combo": {
+        "model": "claude-opus-4-6",
+        "effort": "medium",
+        "label": "opus-4-6 / med"
+      },
+      "latencyMs": 27062,
+      "costUsd": 0.0803045,
+      "inputTokens": 7,
+      "outputTokens": 666,
+      "cacheReadTokens": 67196,
+      "cacheCreationTokens": 4722,
+      "rawResult": "There's one untracked file: `test/benchmark-claude-openings.ts`. This file existed before our conversation — I didn't create or modify any files. \n\nWould you like me to commit and push this file, or is it something you'd prefer to handle yourself?",
+      "openings": [
+        "There's one untracked file: `test/benchmark-claude-openings.ts`. This file existed before our conversation — I didn't create or modify any files.",
+        "Would you like me to commit and push this file, or is it something you'd prefer to handle yourself?"
+      ],
+      "parseStatus": "partial",
+      "error": null
+    },
+    {
+      "combo": {
+        "model": "claude-opus-4-6",
+        "effort": "xhigh",
+        "label": "opus-4-6 / xhigh"
+      },
+      "latencyMs": 180938,
+      "costUsd": 0.5063375,
+      "inputTokens": 16,
+      "outputTokens": 8975,
+      "cacheReadTokens": 264752,
+      "cacheCreationTokens": 23842,
+      "rawResult": "I need your approval to run `git add` and `git commit`. Could you please approve the git commands so I can commit and push the untracked `test/benchmark-claude-openings.ts` file?",
+      "openings": [
+        "I need your approval to run `git add` and `git commit`. Could you please approve the git commands so I can commit and push the untracked `test/benchmark-claude-openings.ts` file?"
+      ],
+      "parseStatus": "partial",
+      "error": null
+    },
+    {
+      "combo": {
+        "model": "claude-opus-4-7",
+        "effort": "medium",
+        "label": "opus-4-7 / med"
+      },
+      "latencyMs": 12384,
+      "costUsd": 0.13992875,
+      "inputTokens": 11,
+      "outputTokens": 436,
+      "cacheReadTokens": 18772,
+      "cacheCreationTokens": 19055,
+      "rawResult": "[\"Тиндер-свидание шло идеально, пока она не достала из сумки\",\"Священник на исповеди узнал свой почерк в записке про\",\"Коллега принёс торт на работу, а внутри оказался\",\"Утром в зеркале он увидел не себя —\",\"Купил кофе навынос, бариста написала на стакане\",\"В детском доме новый спонсор раздавал подарки строго по\",\"Лифт застрял между этажами и сосед предложил\",\"Стоматолог включил дрель и шёпотом признался что\",\"Дед на 9 мая показал внукам свою коллекцию\",\"Невеста на свадьбе вместо «да» сказала имя\"]",
+      "openings": [
+        "Тиндер-свидание шло идеально, пока она не достала из сумки",
+        "Священник на исповеди узнал свой почерк в записке про",
+        "Коллега принёс торт на работу, а внутри оказался",
+        "Утром в зеркале он увидел не себя —",
+        "Купил кофе навынос, бариста написала на стакане",
+        "В детском доме новый спонсор раздавал подарки строго по",
+        "Лифт застрял между этажами и сосед предложил",
+        "Стоматолог включил дрель и шёпотом признался что",
+        "Дед на 9 мая показал внукам свою коллекцию",
+        "Невеста на свадьбе вместо «да» сказала имя"
+      ],
+      "parseStatus": "ok",
+      "error": null
+    },
+    {
+      "combo": {
+        "model": "claude-opus-4-7",
+        "effort": "xhigh",
+        "label": "opus-4-7 / xhigh"
+      },
+      "latencyMs": 13231,
+      "costUsd": 0.0635845,
+      "inputTokens": 11,
+      "outputTokens": 485,
+      "cacheReadTokens": 32291,
+      "cacheCreationTokens": 5560,
+      "rawResult": "[\"Тиндер-свидание закончилось когда она достала из сумки\",\"Утром понедельника начальник зашёл в офис с криком —\",\"В детском доме ёлку нарядили необычно: вместо игрушек висели\",\"Воспитательница в садике объявила новую игру под названием\",\"Сосед каждое утро здоровается одной и той же фразой:\",\"Купил абонемент в зал, через месяц вспомнил что\",\"Бариста перепутал мой заказ и налил вместо латте\",\"Стриптизёрша на корпоративе узнала среди клиентов своего\",\"На уроке ОБЖ детям раздали противогазы и сказали:\",\"Хирург открыл пациента и нашёл внутри записку с надписью\"]",
+      "openings": [
+        "Тиндер-свидание закончилось когда она достала из сумки",
+        "Утром понедельника начальник зашёл в офис с криком —",
+        "В детском доме ёлку нарядили необычно: вместо игрушек висели",
+        "Воспитательница в садике объявила новую игру под названием",
+        "Сосед каждое утро здоровается одной и той же фразой:",
+        "Купил абонемент в зал, через месяц вспомнил что",
+        "Бариста перепутал мой заказ и налил вместо латте",
+        "Стриптизёрша на корпоративе узнала среди клиентов своего",
+        "На уроке ОБЖ детям раздали противогазы и сказали:",
+        "Хирург открыл пациента и нашёл внутри записку с надписью"
+      ],
+      "parseStatus": "ok",
+      "error": null
+    }
+  ]
+}
