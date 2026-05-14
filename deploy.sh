@@ -58,6 +58,13 @@ done
 
 echo "Importing curated seeds (idempotent)..."
 cd "$APP_DIR/api"
+# Export env explicitly: PM2 envs aren't inherited by the shell after pm2 start.
+set -a
+[ -f "$APP_DIR/.env" ] && . "$APP_DIR/.env"
+export DATABASE_URL="postgres://punchme:punchme@127.0.0.1:5432/punchme"
+export OLLAMA_BASE_URL="http://127.0.0.1:11434"
+export OLLAMA_EMBED_MODEL="bge-m3"
+set +a
 npm run import:seeds || echo "WARN: import:seeds failed — continuing"
 
 echo "Backfilling embeddings (uses Ollama bge-m3)..."
