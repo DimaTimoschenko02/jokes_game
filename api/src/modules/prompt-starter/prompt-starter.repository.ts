@@ -132,6 +132,7 @@ export class PromptStarterRepository {
     readonly hasAdminScore?: 'yes' | 'no'
     readonly isSeed?: 'yes' | 'no'
     readonly isGolden?: 'yes' | 'no'
+    readonly isFallback?: 'yes' | 'no'
   }): Promise<{ readonly items: readonly PromptStarterEntry[]; readonly total: number }> {
     const offset: number = (input.page - 1) * input.limit
     const completionsCountExpr =
@@ -157,6 +158,11 @@ export class PromptStarterRepository {
       conditions.push(eq(promptStarters.isGolden, true))
     } else if (input.isGolden === 'no') {
       conditions.push(eq(promptStarters.isGolden, false))
+    }
+    if (input.isFallback === 'yes') {
+      conditions.push(eq(promptStarters.isFallback, true))
+    } else if (input.isFallback === 'no') {
+      conditions.push(eq(promptStarters.isFallback, false))
     }
     const whereExpr: SQL | undefined = conditions.length > 0 ? and(...conditions) : undefined
 
@@ -188,6 +194,7 @@ export class PromptStarterRepository {
       readonly adminComment?: string | null
       readonly adminScoredBy?: string
       readonly isGolden?: boolean
+      readonly isFallback?: boolean
     }
   ): Promise<void> {
     const set: Record<string, unknown> = {}
@@ -209,6 +216,9 @@ export class PromptStarterRepository {
       if (input.isGolden) {
         set.goldenSince = new Date()
       }
+    }
+    if (input.isFallback !== undefined) {
+      set.isFallback = input.isFallback
     }
     if (Object.keys(set).length === 0) {
       return
@@ -250,6 +260,57 @@ export class PromptStarterRepository {
 
   public async deleteById(id: string): Promise<void> {
     await this.db.delete(promptStarters).where(eq(promptStarters.id, id))
+  }
+
+  public async createOne(input: {
+    readonly text: string
+    readonly adminScore?: number | null
+    readonly adminComment?: string | null
+    readonly adminScoredBy?: string
+    readonly isGolden?: boolean
+    readonly isFallback?: boolean
+  }): Promise<PromptStarterEntry> {
+    const now = new Date()
+    const values: typeof promptStarters.$inferInsert = {
+      text: input.text,
+      isSeed: false
+    }
+    if (input.adminScore !== undefined && input.adminScore !== null) {
+      values.adminScore = input.adminScore
+      values.adminScoredAt = now
+      if (input.adminScoredBy !== undefined) {
+        values.adminScoredBy = input.adminScoredBy
+      }
+    }
+    if (input.adminComment !== undefined && input.adminComment !== null) {
+      values.adminComment = input.adminComment
+    }
+    if (input.isGolden) {
+      values.isGolden = true
+      values.goldenSince = now
+    }
+    if (input.isFallback) {
+      values.isFallback = true
+    }
+    const rows = await this.db.insert(promptStarters).values(values).returning()
+    const row = rows[0]
+    if (!row) {
+      throw new Error('prompt_starters insert returned no rows')
+    }
+    return this.toEntry(row, [])
+  }
+
+  public async findRandomFallback(limit: number): Promise<readonly string[]> {
+    if (limit <= 0) {
+      return []
+    }
+    const rows = await this.db
+      .select({ text: promptStarters.text })
+      .from(promptStarters)
+      .where(eq(promptStarters.isFallback, true))
+      .orderBy(sql`random()`)
+      .limit(limit)
+    return rows.map((r) => r.text)
   }
 
   public async removeCompletion(id: string, completionIndex: number): Promise<void> {
@@ -442,6 +503,7 @@ export class PromptStarterRepository {
       usedCount: row.usedCount,
       completions,
       isGolden: row.isGolden,
+      isFallback: row.isFallback,
       averageCompletionRating: row.averageCompletionRating ?? undefined,
       averageVoteShare: row.averageVoteShare ?? undefined,
       goldenSince: row.goldenSince ?? undefined,

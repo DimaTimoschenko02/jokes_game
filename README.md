@@ -84,6 +84,8 @@ Drizzle helpers (run inside `api/`):
 |---------|-------------|
 | `npm run db:generate` | Generate migration SQL after schema changes |
 | `npm run db:studio` | Open Drizzle Studio (DB inspector) |
+| `npm run import:seeds` | Insert curated openings (4 with admin scores) + 7 reference jokes with embeddings via Ollama. Idempotent — safe to re-run. |
+| `npm run backfill:embeddings` | Compute embeddings for joke_memory rows where `prompt_embedding IS NULL`. Run after `import:seeds` or after Ollama becomes available. |
 
 ## Production Deployment
 
@@ -173,6 +175,33 @@ OLLAMA_BASE_URL=http://localhost:11434 \
 PORT=4000 \
 node dist/main.js
 ```
+
+#### 4a. First-time DB bootstrap
+
+Drizzle applies migrations automatically on every API boot. On a fresh DB this
+gives you:
+- All schema (`prompt_starters`, `joke_memory`, `users`, etc.)
+- 4 curated admin-scored openings + 7 reference jokes (migration `0005`)
+- Same openings flagged `is_fallback = true` (migration `0006`) so the game has
+  something to serve when the agent times out
+
+Embeddings in those rows start as `NULL`. To enable few-shot similarity search:
+
+```bash
+# Verify Ollama is up and BGE-M3 is pulled
+curl http://localhost:11434/api/tags | grep bge-m3
+
+# Re-import seeds with embeddings (idempotent — UPSERT)
+cd api && npm run import:seeds
+
+# Backfill any joke_memory rows that still lack embeddings
+npm run backfill:embeddings
+```
+
+To add more openings without a code change: use the admin panel
+(`/admin` → Prompts tab → "+ Создать опенинг"). Tick **Golden** for it to
+appear as a few-shot example in the opening-generator prompt; tick
+**Fallback** to add it to the pool used when the AI generator fails.
 
 #### 5. Web
 

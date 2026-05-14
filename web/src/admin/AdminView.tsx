@@ -112,12 +112,14 @@ function PromptsTab({ token }: { readonly token: string }): ReactElement {
     search: '',
     hasAdminScore: 'all',
     isSeed: 'all',
-    isGolden: 'all'
+    isGolden: 'all',
+    isFallback: 'all'
   })
   const [items, setItems] = useState<readonly PromptListItem[]>([])
   const [total, setTotal] = useState<number>(0)
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState<boolean>(false)
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -141,6 +143,7 @@ function PromptsTab({ token }: { readonly token: string }): ReactElement {
     adminScore?: number | null
     adminComment?: string | null
     isGolden?: boolean
+    isFallback?: boolean
   }): Promise<void> => {
     try {
       await adminApi.updatePrompt(token, id, body)
@@ -164,6 +167,20 @@ function PromptsTab({ token }: { readonly token: string }): ReactElement {
 
   return (
     <div>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <button type="button" className="primary" onClick={() => setCreating((c) => !c)}>
+          {creating ? '× Отмена' : '+ Создать опенинг'}
+        </button>
+      </div>
+      {creating && (
+        <CreatePromptForm
+          token={token}
+          onCreated={async () => {
+            setCreating(false)
+            await load()
+          }}
+        />
+      )}
       <FilterBar
         query={query}
         onChange={(q) => setQuery({ ...query, ...q, page: 1 })}
@@ -171,6 +188,7 @@ function PromptsTab({ token }: { readonly token: string }): ReactElement {
         showSource={false}
         showRating={false}
         showGolden={true}
+        showFallback={true}
       />
       {error && <p className="errorText">{error}</p>}
       {loading && <p className="subtitle">Загрузка...</p>}
@@ -281,6 +299,7 @@ type FilterBarQuery = {
   readonly hasAdminScore?: YesNoFilter
   readonly isSeed?: YesNoFilter
   readonly isGolden?: YesNoFilter
+  readonly isFallback?: YesNoFilter
   readonly source?: SourceFilter
   readonly hasRating?: YesNoFilter
 }
@@ -292,8 +311,9 @@ function FilterBar(props: {
   readonly showSource: boolean
   readonly showRating: boolean
   readonly showGolden: boolean
+  readonly showFallback?: boolean
 }): ReactElement {
-  const { query, onChange, sortOptions, showSource, showRating, showGolden } = props
+  const { query, onChange, sortOptions, showSource, showRating, showGolden, showFallback } = props
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div className="row">
@@ -366,6 +386,19 @@ function FilterBar(props: {
             <select
               value={query.isGolden ?? 'all'}
               onChange={(e) => onChange({ isGolden: e.target.value as YesNoFilter })}
+            >
+              {(['all', 'yes', 'no'] as YesNoFilter[]).map((v) => (
+                <option key={v} value={v}>{YES_NO_LABELS[v]}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {showFallback && (
+          <label className="inputGroup" style={{ flex: '1 1 100px' }}>
+            <span>Fallback</span>
+            <select
+              value={query.isFallback ?? 'all'}
+              onChange={(e) => onChange({ isFallback: e.target.value as YesNoFilter })}
             >
               {(['all', 'yes', 'no'] as YesNoFilter[]).map((v) => (
                 <option key={v} value={v}>{YES_NO_LABELS[v]}</option>
@@ -465,6 +498,104 @@ function Chip({
   return <span className={cls}>{children}</span>
 }
 
+function CreatePromptForm({
+  token,
+  onCreated
+}: {
+  readonly token: string
+  readonly onCreated: () => Promise<void>
+}): ReactElement {
+  const [text, setText] = useState<string>('')
+  const [adminScore, setAdminScore] = useState<number | null>(null)
+  const [adminComment, setAdminComment] = useState<string>('')
+  const [isGolden, setIsGolden] = useState<boolean>(false)
+  const [isFallback, setIsFallback] = useState<boolean>(false)
+  const [saving, setSaving] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async (): Promise<void> => {
+    const trimmed = text.trim()
+    if (trimmed.length === 0) {
+      setError('Текст пустой')
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await adminApi.createPrompt(token, {
+        text: trimmed,
+        adminScore,
+        adminComment: adminComment.trim().length > 0 ? adminComment : null,
+        isGolden,
+        isFallback
+      })
+      setText('')
+      setAdminScore(null)
+      setAdminComment('')
+      setIsGolden(false)
+      setIsFallback(false)
+      await onCreated()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="phaseBlock" style={{ marginBottom: 12 }}>
+      <h3 style={{ margin: '0 0 8px 0' }}>Новый опенинг</h3>
+      <p className="subtitle" style={{ marginBottom: 8 }}>
+        Чтобы попадал в few-shot для генератора — поставь <b>Golden</b> + admin score ≥ 8.<br />
+        Чтобы использовался при падении генератора — поставь <b>Fallback</b>.
+      </p>
+      <textarea
+        value={text}
+        placeholder="Текст опенинга (без точки/многоточия в конце)"
+        onChange={(e) => setText(e.target.value)}
+        style={{ minHeight: 60 }}
+      />
+      <label className="inputGroup" style={{ marginTop: 8 }}>
+        <span>Admin score (1–10, опционально)</span>
+        <ScoreScale value={adminScore} onChange={setAdminScore} />
+      </label>
+      <div className="row" style={{ marginTop: 8, gridTemplateColumns: 'auto auto 1fr' }}>
+        <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
+          <input
+            type="checkbox"
+            style={{ width: 'auto' }}
+            checked={isGolden}
+            onChange={(e) => setIsGolden(e.target.checked)}
+          />
+          <span>Golden (попадает в few-shot)</span>
+        </label>
+        <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
+          <input
+            type="checkbox"
+            style={{ width: 'auto' }}
+            checked={isFallback}
+            onChange={(e) => setIsFallback(e.target.checked)}
+          />
+          <span>Fallback (используется когда AI упал)</span>
+        </label>
+        <div />
+      </div>
+      <textarea
+        value={adminComment}
+        placeholder="Комментарий (опционально)"
+        onChange={(e) => setAdminComment(e.target.value)}
+        style={{ marginTop: 8 }}
+      />
+      {error && <p className="errorText" style={{ marginTop: 8 }}>{error}</p>}
+      <div className="row" style={{ marginTop: 10 }}>
+        <button type="button" className="primary" disabled={saving} onClick={submit}>
+          {saving ? 'Сохраняю...' : 'Создать'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function PromptRow({
   item,
   token,
@@ -473,13 +604,14 @@ function PromptRow({
 }: {
   readonly item: PromptListItem
   readonly token: string
-  readonly onSave: (id: string, body: { adminScore?: number | null; adminComment?: string | null; isGolden?: boolean }) => Promise<void>
+  readonly onSave: (id: string, body: { adminScore?: number | null; adminComment?: string | null; isGolden?: boolean; isFallback?: boolean }) => Promise<void>
   readonly onDelete: (id: string) => Promise<void>
 }): ReactElement {
   const [editing, setEditing] = useState<boolean>(false)
   const [adminScore, setAdminScore] = useState<number | null>(item.adminScore ?? null)
   const [adminComment, setAdminComment] = useState<string>(item.adminComment ?? '')
   const [isGolden, setIsGolden] = useState<boolean>(item.isGolden)
+  const [isFallback, setIsFallback] = useState<boolean>(item.isFallback)
   const [expanded, setExpanded] = useState<boolean>(false)
   const [detail, setDetail] = useState<PromptDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState<boolean>(false)
@@ -514,6 +646,7 @@ function PromptRow({
       <p style={{ fontSize: '1.05em', margin: '0 0 6px 0' }}>{item.text}</p>
       <div className="adminChips">
         {item.isGolden && <Chip tone="golden">★ GOLDEN</Chip>}
+        {item.isFallback && <Chip tone="positive">🔄 FALLBACK</Chip>}
         <Chip tone={item.adminScore !== null ? (item.adminScore >= 7 ? 'positive' : item.adminScore <= 3 ? 'negative' : undefined) : 'muted'}>
           admin: <strong>{item.adminScore ?? '—'}</strong>
         </Chip>
@@ -534,15 +667,27 @@ function PromptRow({
             <span>Admin score (1–10)</span>
             <ScoreScale value={adminScore} onChange={setAdminScore} />
           </label>
-          <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
-            <input
-              type="checkbox"
-              style={{ width: 'auto' }}
-              checked={isGolden}
-              onChange={(e) => setIsGolden(e.target.checked)}
-            />
-            <span>Golden</span>
-          </label>
+          <div className="row" style={{ gridTemplateColumns: 'auto auto 1fr' }}>
+            <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
+              <input
+                type="checkbox"
+                style={{ width: 'auto' }}
+                checked={isGolden}
+                onChange={(e) => setIsGolden(e.target.checked)}
+              />
+              <span>Golden</span>
+            </label>
+            <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 6, width: 'auto' }}>
+              <input
+                type="checkbox"
+                style={{ width: 'auto' }}
+                checked={isFallback}
+                onChange={(e) => setIsFallback(e.target.checked)}
+              />
+              <span>Fallback</span>
+            </label>
+            <div />
+          </div>
           <textarea
             value={adminComment}
             placeholder="Комментарий (опционально)"
@@ -555,7 +700,8 @@ function PromptRow({
                 await onSave(item.id, {
                   adminScore,
                   adminComment: adminComment.trim().length > 0 ? adminComment : null,
-                  isGolden
+                  isGolden,
+                  isFallback
                 })
                 setEditing(false)
               }}

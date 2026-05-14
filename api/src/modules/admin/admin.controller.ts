@@ -88,7 +88,8 @@ export class AdminController {
     @Query('search') search?: string,
     @Query('hasAdminScore') hasAdminScore?: YesNoAll,
     @Query('isSeed') isSeed?: YesNoAll,
-    @Query('isGolden') isGolden?: YesNoAll
+    @Query('isGolden') isGolden?: YesNoAll,
+    @Query('isFallback') isFallback?: YesNoAll
   ): Promise<{
     items: readonly Record<string, unknown>[]
     total: number
@@ -107,11 +108,52 @@ export class AdminController {
       search,
       hasAdminScore: parseYesNo(hasAdminScore),
       isSeed: parseYesNo(isSeed),
-      isGolden: parseYesNo(isGolden)
+      isGolden: parseYesNo(isGolden),
+      isFallback: parseYesNo(isFallback)
     })
 
     const items = result.items.map((item) => this.serializePrompt(item))
     return { items, total: result.total, page: pageNum, limit: limitNum }
+  }
+
+  @Post('prompts')
+  @UseGuards(AdminGuard)
+  public async createPrompt(
+    @Body() body: {
+      text?: string
+      adminScore?: number | null
+      adminComment?: string | null
+      isGolden?: boolean
+      isFallback?: boolean
+    }
+  ): Promise<{ id: string } | { error: string }> {
+    const text: string = typeof body.text === 'string' ? body.text.trim() : ''
+    if (text.length === 0) {
+      return { error: 'text is required' }
+    }
+    const existing = await this.promptRepository.findByText(text)
+    if (existing) {
+      return { error: 'opening with this text already exists' }
+    }
+    const created = await this.promptRepository.createOne({
+      text,
+      adminScore:
+        body.adminScore === null
+          ? null
+          : typeof body.adminScore === 'number'
+          ? Math.min(10, Math.max(1, Math.floor(body.adminScore)))
+          : undefined,
+      adminComment:
+        body.adminComment === null
+          ? null
+          : typeof body.adminComment === 'string'
+          ? body.adminComment.trim()
+          : undefined,
+      adminScoredBy: 'admin',
+      isGolden: body.isGolden === true,
+      isFallback: body.isFallback === true
+    })
+    return { id: created._id }
   }
 
   @Get('prompts/:id')
@@ -147,6 +189,7 @@ export class AdminController {
       adminScore?: number | null
       adminComment?: string | null
       isGolden?: boolean
+      isFallback?: boolean
     }
   ): Promise<{ ok: boolean }> {
     const updates: {
@@ -155,6 +198,7 @@ export class AdminController {
       adminComment?: string | null
       adminScoredBy?: string
       isGolden?: boolean
+      isFallback?: boolean
     } = {}
     if (typeof body.text === 'string' && body.text.trim().length > 0) {
       updates.text = body.text.trim()
@@ -172,6 +216,9 @@ export class AdminController {
     }
     if (typeof body.isGolden === 'boolean') {
       updates.isGolden = body.isGolden
+    }
+    if (typeof body.isFallback === 'boolean') {
+      updates.isFallback = body.isFallback
     }
     await this.promptRepository.updateAdminFields(id, updates)
     return { ok: true }
@@ -291,6 +338,7 @@ export class AdminController {
       completionsCount: item.completions?.length ?? 0,
       avgVoteShare: this.calcAvgVoteShare(item.completions ?? []),
       isGolden: item.isGolden ?? false,
+      isFallback: item.isFallback ?? false,
       feedbackScore: item.feedbackScore,
       feedbackSum: item.userQuickFeedback.sum,
       feedbackCount: item.userQuickFeedback.count,

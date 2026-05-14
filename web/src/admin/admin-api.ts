@@ -10,6 +10,7 @@ export type PromptListItem = {
   readonly completionsCount: number
   readonly avgVoteShare: number | null
   readonly isGolden: boolean
+  readonly isFallback: boolean
   readonly feedbackScore: number
   readonly feedbackSum: number
   readonly feedbackCount: number
@@ -75,6 +76,15 @@ export type ListPromptsQuery = {
   readonly hasAdminScore?: YesNoFilter
   readonly isSeed?: YesNoFilter
   readonly isGolden?: YesNoFilter
+  readonly isFallback?: YesNoFilter
+}
+
+export type CreatePromptPayload = {
+  readonly text: string
+  readonly adminScore?: number | null
+  readonly adminComment?: string | null
+  readonly isGolden?: boolean
+  readonly isFallback?: boolean
 }
 
 export type ListJokesQuery = {
@@ -145,9 +155,13 @@ export const adminApi = {
       search: query.search,
       hasAdminScore: query.hasAdminScore,
       isSeed: query.isSeed,
-      isGolden: query.isGolden
+      isGolden: query.isGolden,
+      isFallback: query.isFallback
     })
     return request(`/api/admin/prompts${qs}`, { method: 'GET', token })
+  },
+  createPrompt(token: string, body: CreatePromptPayload): Promise<{ id: string }> {
+    return request(`/api/admin/prompts`, { method: 'POST', body, token })
   },
   getPrompt(token: string, id: string): Promise<PromptDetail> {
     return request(`/api/admin/prompts/${id}`, { method: 'GET', token })
@@ -160,6 +174,7 @@ export const adminApi = {
       adminScore?: number | null
       adminComment?: string | null
       isGolden?: boolean
+      isFallback?: boolean
     }
   ): Promise<{ ok: boolean }> {
     return request(`/api/admin/prompts/${id}`, { method: 'PATCH', body, token })

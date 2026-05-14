@@ -43,6 +43,13 @@
       "when": 1778830000000,
       "tag": "0005_curated_seeds",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1778831000000,
+      "tag": "0006_fallback_flag",
+      "breakpoints": true
     }
   ]
 }

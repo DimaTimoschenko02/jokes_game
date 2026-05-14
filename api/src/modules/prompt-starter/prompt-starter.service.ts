@@ -1,24 +1,20 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { normalizePromptIdentity } from '../../common/prompt-identity.util'
 import { AiService } from '../ai/ai.service'
-import { SEED_PROMPTS } from './constants/seed-prompts.constant'
 import { PushCompletionInput } from './models/push-completion-input.type'
 import { PromptStarterRepository } from './prompt-starter.repository'
 
 const BACKGROUND_GENERATION_COUNT: number = 4
+const FALLBACK_POOL_SIZE: number = 16
 
 @Injectable()
-export class PromptStarterService implements OnModuleInit {
+export class PromptStarterService {
   private readonly logger: Logger = new Logger(PromptStarterService.name)
 
   public constructor(
     private readonly repository: PromptStarterRepository,
     private readonly aiService: AiService
   ) {}
-
-  public async onModuleInit(): Promise<void> {
-    await this.seedIfEmpty()
-  }
 
   public async selectPrompts(input: {
     readonly count: number
@@ -37,9 +33,9 @@ export class PromptStarterService implements OnModuleInit {
       return entries.map((entry) => entry.text)
     }
     this.logger.warn(
-      `select_prompts insufficient_results needed=${input.count} got=${entries.length} falling_back_to_seed`
+      `select_prompts insufficient_results needed=${input.count} got=${entries.length} falling_back_to_fallback_pool`
     )
-    return this.fillFromSeed(entries.map((e) => e.text), input.count, input.excludedTexts)
+    return this.fillFromFallback(entries.map((e) => e.text), input.count, input.excludedTexts)
   }
 
   public pushCompletion(input: PushCompletionInput): void {
@@ -124,27 +120,18 @@ export class PromptStarterService implements OnModuleInit {
     }
   }
 
-  private async seedIfEmpty(): Promise<void> {
-    const existingCount = await this.repository.count()
-    if (existingCount > 0) {
-      this.logger.log(`seed_skip existing_count=${existingCount}`)
-      return
-    }
-    await this.repository.upsertMany([...SEED_PROMPTS])
-    this.logger.log(`seed_complete count=${SEED_PROMPTS.length}`)
-  }
-
-  private fillFromSeed(
+  private async fillFromFallback(
     selected: readonly string[],
     needed: number,
     excludedTexts: readonly string[]
-  ): readonly string[] {
+  ): Promise<readonly string[]> {
     const result = [...selected]
     const usedIdentities = new Set([
       ...result.map((t) => normalizePromptIdentity(t)),
       ...excludedTexts.map((t) => normalizePromptIdentity(t))
     ])
-    for (const prompt of SEED_PROMPTS) {
+    const fallbackPool = await this.repository.findRandomFallback(FALLBACK_POOL_SIZE)
+    for (const prompt of fallbackPool) {
       if (result.length >= needed) {
         break
       }
@@ -154,6 +141,11 @@ export class PromptStarterService implements OnModuleInit {
       }
       result.push(prompt)
       usedIdentities.add(identity)
+    }
+    if (result.length < needed) {
+      this.logger.warn(
+        `fillFromFallback_insufficient needed=${needed} got=${result.length} fallback_pool=${fallbackPool.length}`
+      )
     }
     return result
   }

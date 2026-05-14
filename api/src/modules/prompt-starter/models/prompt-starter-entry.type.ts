@@ -22,6 +22,7 @@ export interface PromptStarterEntry {
   readonly usedCount: number
   readonly completions: readonly PromptCompletion[]
   readonly isGolden?: boolean
+  readonly isFallback?: boolean
   readonly averageCompletionRating?: number
   readonly averageVoteShare?: number
   readonly goldenSince?: Date
