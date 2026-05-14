@@ -21,8 +21,8 @@ module.exports = {
   apps: [
     {
       name: 'punchme-api',
-      script: 'api/dist/main.js',
-      cwd: '/home/qwe/apps/punchme',
+      script: 'dist/main.js',
+      cwd: '/home/qwe/apps/punchme/api',
       exp_backoff_restart_delay: 1000,
       max_restarts: 50,
       min_uptime: '10s',
