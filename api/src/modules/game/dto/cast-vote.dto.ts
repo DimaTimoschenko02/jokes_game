@@ -1,4 +1,4 @@
-import { IsIn, IsString, Length } from 'class-validator'
+import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator'
 
 export class CastVoteDto {
   @IsString()
@@ -11,4 +11,8 @@ export class CastVoteDto {
   @IsString()
   @IsIn(['left', 'right'])
   public side!: 'left' | 'right'
+
+  @IsOptional()
+  @IsBoolean()
+  public golden?: boolean
 }

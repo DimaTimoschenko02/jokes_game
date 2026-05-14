@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactElement, ReactNode } from 'react'
 import { useAuth } from '../auth/auth-context'
+import { ScoreScale } from '../components/ScoreScale'
 import {
   adminApi,
   type JokeListItem,
@@ -44,8 +45,6 @@ const SOURCE_LABELS: Record<SourceFilter, string> = {
   human: 'Люди',
   bot: 'Боты'
 }
-
-const SCORE_VALUES: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
 export function AdminView({ onBack }: { readonly onBack: () => void }): ReactElement {
   const { user, token } = useAuth()
@@ -451,38 +450,6 @@ function Pagination({
       <button className="secondary" disabled={page <= 1} onClick={() => onChange(page - 1)}>← Назад</button>
       <span style={{ alignSelf: 'center' }}>{page} / {totalPages}</span>
       <button className="secondary" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>Вперёд →</button>
-    </div>
-  )
-}
-
-function ScoreScale({
-  value,
-  onChange
-}: {
-  readonly value: number | null
-  readonly onChange: (next: number | null) => void
-}): ReactElement {
-  return (
-    <div className="scoreScale">
-      {SCORE_VALUES.map((n) => (
-        <button
-          key={n}
-          type="button"
-          className={value === n ? 'active' : ''}
-          onClick={() => onChange(n)}
-        >
-          {n}
-        </button>
-      ))}
-      <div className="scoreDivider" />
-      <button
-        type="button"
-        className="clear"
-        onClick={() => onChange(null)}
-        disabled={value === null}
-      >
-        Убрать
-      </button>
     </div>
   )
 }

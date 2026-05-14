@@ -38,8 +38,10 @@ export const createHumanPlayer = (input: {
   score: 0
 })
 
+const BOT_NAMES: readonly string[] = ['Ебланыч', 'Зеля']
+
 export const createBotPlayer = (input: { readonly botNumber: number }): Player => {
-  const label: string = `AI Bot ${input.botNumber}`
+  const label: string = BOT_NAMES[input.botNumber - 1] ?? `AI Bot ${input.botNumber}`
   return {
     id: createId(),
     socketId: null,
@@ -128,6 +130,7 @@ export const createDuelsForPrompts = (room: GameRoom): Duel[] => {
       leftPlayerId: leftFirst ? playerA : playerB,
       rightPlayerId: leftFirst ? playerB : playerA,
       votes: new Map<string, 'left' | 'right'>(),
+      goldenVoters: new Set<string>(),
       closed: false
     })
   }

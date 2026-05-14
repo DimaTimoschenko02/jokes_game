@@ -26,6 +26,7 @@ export type CastVotePayload = {
   readonly roomCode: string
   readonly duelId: string
   readonly side: 'left' | 'right'
+  readonly golden?: boolean
 }
 
 export type SubmitRatingsPayload = {

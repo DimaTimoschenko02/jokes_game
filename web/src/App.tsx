@@ -8,6 +8,7 @@ import { useGameClient } from './hooks/use-game-client'
 import { AuthView } from './views/AuthView'
 import { ProfileView } from './views/ProfileView'
 import { AdminView } from './admin/AdminView'
+import { ScoreScale } from './components/ScoreScale'
 
 type AppTheme = 'light' | 'gray' | 'dark'
 const THEMES: readonly AppTheme[] = ['light', 'gray', 'dark']
@@ -57,8 +58,6 @@ const buildRatingPayload = (ratings: Record<string, number>): readonly { readonl
     .filter(([, score]) => Number.isInteger(score) && score >= 1 && score <= 10)
     .map(([itemId, score]) => ({ itemId, score }))
 
-const getRatingLabel = (value: number): string => (value ? `${value}/10` : 'Оценка')
-
 const isOwnJoke = (item: RatingItem, playerId: string | undefined): boolean => item.authorPlayerId === playerId
 
 const getRoomCodeFromUrl = (): string | null => {
@@ -94,6 +93,7 @@ function App(): ReactElement {
   } = useGameClient({ token, onAuthError: handleAuthError })
 
   const [roomCodeToJoin, setRoomCodeToJoin] = useState<string>(getRoomCodeFromUrl() ?? '')
+  const [autoJoinAttempted, setAutoJoinAttempted] = useState<boolean>(false)
   const [roundCount, setRoundCount] = useState<number>(DEFAULT_ROUNDS)
   const [botCount, setBotCount] = useState<number>(DEFAULT_BOTS)
   const [testMode, setTestMode] = useState<boolean>(false)
@@ -141,6 +141,9 @@ function App(): ReactElement {
       ? gameState.currentDuel.votesByPlayerId[session.playerId]
       : undefined
   const hasVotedCurrentDuel = Boolean(myVoteSide)
+  const myVoteIsGolden = Boolean(
+    session && gameState?.currentDuel && gameState.currentDuel.goldenVoterIds.includes(session.playerId)
+  )
   const isDuelParticipant = Boolean(
     session &&
       gameState?.currentDuel &&
@@ -148,7 +151,7 @@ function App(): ReactElement {
         session.playerId === gameState.currentDuel.rightPlayerId)
   )
   const canVoteCurrentDuel = Boolean(
-    gameState?.phase === 'voting' && gameState.currentDuel && !isDuelParticipant && !hasVotedCurrentDuel
+    gameState?.phase === 'voting' && gameState.currentDuel && !isDuelParticipant && !myVoteIsGolden
   )
   const showVoteBreakdown = Boolean(
     gameState?.currentDuel &&
@@ -200,6 +203,21 @@ function App(): ReactElement {
       setIsStartingGame(false)
     }
   }, [gameState?.phase])
+
+  useEffect(() => {
+    if (autoJoinAttempted || !token || !user || session || gameState) {
+      return
+    }
+    const codeFromUrl = getRoomCodeFromUrl()
+    if (!codeFromUrl || codeFromUrl.length !== ROOM_CODE_LENGTH) {
+      return
+    }
+    setAutoJoinAttempted(true)
+    executeJoinRoom({ roomCode: codeFromUrl })
+    const url = new URL(window.location.href)
+    url.searchParams.delete('room')
+    window.history.replaceState({}, '', url.toString())
+  }, [token, user, session, gameState, autoJoinAttempted, executeJoinRoom])
 
   useEffect(() => {
     if (gameState?.phase === 'writing') {
@@ -312,18 +330,32 @@ function App(): ReactElement {
     setRatingsSubmittedLocally(true)
   }
 
+  const lastVoteClickRef = useRef<{ duelId: string; side: 'left' | 'right'; ts: number } | null>(null)
   const handleVote = (side: 'left' | 'right'): void => {
     if (!session || !gameState?.currentDuel) {
       return
     }
-    if (isDuelParticipant || hasVotedCurrentDuel) {
+    if (isDuelParticipant) {
       return
     }
-    executeCastVote({
-      roomCode: session.roomCode,
-      duelId: gameState.currentDuel.id,
-      side
-    })
+    const duelId = gameState.currentDuel.id
+    const myGolden = gameState.currentDuel.goldenVoterIds.includes(session.playerId)
+    if (hasVotedCurrentDuel && (myGolden || myVoteSide !== side)) {
+      return
+    }
+    const now = Date.now()
+    const prev = lastVoteClickRef.current
+    const isDoubleClick =
+      prev !== null && prev.duelId === duelId && prev.side === side && now - prev.ts <= 1500
+    if (isDoubleClick) {
+      executeCastVote({ roomCode: session.roomCode, duelId, side, golden: true })
+      lastVoteClickRef.current = null
+      return
+    }
+    if (!hasVotedCurrentDuel) {
+      executeCastVote({ roomCode: session.roomCode, duelId, side })
+    }
+    lastVoteClickRef.current = { duelId, side, ts: now }
   }
 
   const handleCopyRoomLink = useCallback((): void => {
@@ -462,8 +494,8 @@ function App(): ReactElement {
   }
 
   return (
-    <main className="layout">
-      <section className="panel">
+    <main className="layout wide">
+      <section className="panel wide">
         <header className="header">
           <div>
             <h1>
@@ -518,16 +550,8 @@ function App(): ReactElement {
         </header>
         {errorMessage && <p className="subtitle errorText">{errorMessage}</p>}
 
-        <ul className="scoreboard">
-          {gameState.players.map((player) => (
-            <li key={player.id}>
-              <span>
-                {player.name} {player.isBot ? '🤖' : ''} {player.id === session.playerId ? '(ты)' : ''}
-              </span>
-              <strong>{player.score}</strong>
-            </li>
-          ))}
-        </ul>
+        <div className="gameGrid">
+          <div className="gameMain">
 
         {gameState.phase === 'lobby' && (
           <div className="phaseBlock">
@@ -643,53 +667,63 @@ function App(): ReactElement {
             ) : (
               <p className="subtitle voteHint">Варианты без имён — так объективнее.</p>
             )}
-            <h2>{gameState.currentDuel.prompt}</h2>
+            <h2 className="duelPrompt">{gameState.currentDuel.prompt}</h2>
             {hasVotedCurrentDuel && myVoteSide && !isDuelParticipant && (
               <p className="voteStatus">
-                Ваш голос: {myVoteSide === 'left' ? 'вариант A' : 'вариант B'}
+                Ваш голос: {myVoteSide === 'left' ? 'A' : 'B'}
+                {myVoteIsGolden ? ' 💛 (золотой)' : ''}
               </p>
             )}
-            <button
-              type="button"
-              className={`voteOption ${!canVoteCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'left' ? 'voteSelected' : ''}`}
-              disabled={!canVoteCurrentDuel}
-              onClick={() => handleVote('left')}
-            >
-              <span className="voteOptionMeta">
-                <span className="voteOptionTag">Вариант A</span>
-                {isDuelParticipant && session?.playerId === gameState.currentDuel.leftPlayerId ? (
-                  <span className="voteSelfMark">Ваш ответ</span>
-                ) : null}
-              </span>
-              <span className="voteOptionBody">{gameState.currentDuel.leftAnswer}</span>
-            </button>
-            <button
-              type="button"
-              className={`voteOption ${!canVoteCurrentDuel ? 'voteLocked' : ''} ${myVoteSide === 'right' ? 'voteSelected' : ''}`}
-              disabled={!canVoteCurrentDuel}
-              onClick={() => handleVote('right')}
-            >
-              <span className="voteOptionMeta">
-                <span className="voteOptionTag">Вариант B</span>
-                {isDuelParticipant && session?.playerId === gameState.currentDuel.rightPlayerId ? (
-                  <span className="voteSelfMark">Ваш ответ</span>
-                ) : null}
-              </span>
-              <span className="voteOptionBody">{gameState.currentDuel.rightAnswer}</span>
-            </button>
-            {showVoteBreakdown && gameState.currentDuel ? (
-              <div className="voteBreakdown">
-                <p className="voteBreakdownTitle">Кто за что голосовал</p>
-                <ul className="voteBreakdownList">
-                  {Object.entries(gameState.currentDuel.votesByPlayerId).map(([voterId, side]) => (
-                    <li key={voterId}>
-                      <span>{getPlayerNameById(gameState.players, voterId)}</span>
-                      <span className="voteBreakdownSide">{side === 'left' ? 'A' : 'B'}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+            <div className="duelOptions">
+              {(['left', 'right'] as const).map((side) => {
+                const isLeft = side === 'left'
+                const answer = isLeft ? gameState.currentDuel!.leftAnswer : gameState.currentDuel!.rightAnswer
+                const sidePlayerId = isLeft ? gameState.currentDuel!.leftPlayerId : gameState.currentDuel!.rightPlayerId
+                const isMyAnswer = isDuelParticipant && session?.playerId === sidePlayerId
+                const sideVoters = Object.entries(gameState.currentDuel!.votesByPlayerId)
+                  .filter(([, votedSide]) => votedSide === side)
+                  .map(([voterId]) => voterId)
+                const goldenSet = new Set(gameState.currentDuel!.goldenVoterIds)
+                const sideClickable = canVoteCurrentDuel && (!hasVotedCurrentDuel || myVoteSide === side)
+                return (
+                  <div key={side} className="duelColumn">
+                    <button
+                      type="button"
+                      className={`voteOption ${!sideClickable ? 'voteLocked' : ''} ${myVoteSide === side ? 'voteSelected' : ''} ${myVoteSide === side && myVoteIsGolden ? 'voteGolden' : ''}`}
+                      disabled={!sideClickable}
+                      onClick={() => handleVote(side)}
+                    >
+                      <span className="voteOptionMeta">
+                        <span className="voteOptionTag">{isLeft ? 'Вариант A' : 'Вариант B'}</span>
+                        {isMyAnswer ? <span className="voteSelfMark">Ваш ответ</span> : null}
+                      </span>
+                      <span className="voteOptionBody">{answer}</span>
+                      {!hasVotedCurrentDuel && !isDuelParticipant && (
+                        <span className="voteHintInline">Двойной клик — золотой лайк ×2</span>
+                      )}
+                    </button>
+                    {showVoteBreakdown && sideVoters.length > 0 && (
+                      <div className="voteChips">
+                        {sideVoters.map((voterId) => {
+                          const isGolden = goldenSet.has(voterId)
+                          return (
+                            <span
+                              key={voterId}
+                              className={`voteChip ${isGolden ? 'voteChipGolden' : ''}`}
+                            >
+                              <span className="voteChipHeart">{isGolden ? '💛' : '❤️'}</span>
+                              <span className="voteChipName">
+                                {getPlayerNameById(gameState.players, voterId)}
+                              </span>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
 
@@ -716,18 +750,11 @@ function App(): ReactElement {
                 {isOwnJoke(item, session.playerId) ? (
                   <span className="ratingSelf">Твоя шутка</span>
                 ) : (
-                  <select
-                    value={ratings[item.id] ?? ''}
+                  <ScoreScale
+                    value={ratings[item.id] ?? null}
                     disabled={hasSubmittedRatings}
-                    onChange={(event) => handleRatingChange(item.id, Number(event.target.value))}
-                  >
-                    <option value="">{getRatingLabel(ratings[item.id] ?? 0)}</option>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((score) => (
-                      <option key={score} value={score}>
-                        {score}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(next) => handleRatingChange(item.id, next ?? 0)}
+                  />
                 )}
               </div>
             ))}
@@ -748,6 +775,21 @@ function App(): ReactElement {
             <p>Победитель: {gameState.players[0]?.name ?? 'Нет победителя'}</p>
           </div>
         )}
+          </div>
+          <aside className="gameSidebar">
+            <h3 className="sidebarTitle">Очки</h3>
+            <ul className="scoreboard">
+              {gameState.players.map((player) => (
+                <li key={player.id}>
+                  <span>
+                    {player.name} {player.isBot ? '🤖' : ''} {player.id === session.playerId ? '(ты)' : ''}
+                  </span>
+                  <strong>{player.score}</strong>
+                </li>
+              ))}
+            </ul>
+          </aside>
+        </div>
       </section>
     </main>
   )

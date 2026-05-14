@@ -471,7 +471,13 @@ export class GameService {
     }
   }
 
-  public castVote(input: { readonly roomCode: string; readonly playerId: string; readonly duelId: string; readonly side: 'left' | 'right' }): void {
+  public castVote(input: {
+    readonly roomCode: string
+    readonly playerId: string
+    readonly duelId: string
+    readonly side: 'left' | 'right'
+    readonly golden: boolean
+  }): void {
     const room = this.getRoomOrFail(input.roomCode)
     if (room.phase !== 'voting') {
       throw new BadRequestException('Voting phase is not active')
@@ -483,7 +489,21 @@ export class GameService {
     if (!this.canPlayerVote(duel, input.playerId)) {
       throw new BadRequestException('You cannot vote in this duel')
     }
+    const existingSide = duel.votes.get(input.playerId)
+    if (existingSide && existingSide !== input.side) {
+      throw new BadRequestException('Vote side cannot be changed')
+    }
+    const isAlreadyGolden = duel.goldenVoters.has(input.playerId)
+    if (existingSide && !input.golden) {
+      return
+    }
+    if (existingSide && input.golden && isAlreadyGolden) {
+      return
+    }
     duel.votes.set(input.playerId, input.side)
+    if (input.golden) {
+      duel.goldenVoters.add(input.playerId)
+    }
     this.emitRoomState(room.code)
     if (this.hasAllVotes(room, duel)) {
       this.advanceVoting(room.code)
@@ -1152,6 +1172,7 @@ export class GameService {
     const rightAnswer = rightSubmission ? getAnswerForPromptIndex(rightSubmission, duel.promptIndex) : ''
     const fullVotes = Object.fromEntries(duel.votes) as Record<string, 'left' | 'right'>
     const votesByPlayerId = this.filterVotesForViewer(duel, viewerPlayerId, fullVotes)
+    const goldenVoterIds = Object.keys(votesByPlayerId).filter((voterId) => duel.goldenVoters.has(voterId))
     return {
       id: duel.id,
       prompt: room.prompts[duel.promptIndex],
@@ -1159,7 +1180,8 @@ export class GameService {
       rightPlayerId: duel.rightPlayerId,
       leftAnswer,
       rightAnswer,
-      votesByPlayerId
+      votesByPlayerId,
+      goldenVoterIds
     }
   }
 
@@ -1302,16 +1324,40 @@ export class GameService {
   }
 
   private persistRoundRatings(room: GameRoom): void {
+    const goldenInjected = this.injectGoldenRatings(room)
     const ratingsByItem = this.aggregateRatings(room)
     const itemsWithRatings: number = Array.from(ratingsByItem.values()).filter((stats) => stats.count > 0).length
     this.logger.log(
-      `persist_ratings room=${room.code} round=${room.roundIndex} submissions=${room.ratingSubmissions.size} items=${room.ratingItems.length} items_rated=${itemsWithRatings}`
+      `persist_ratings room=${room.code} round=${room.roundIndex} submissions=${room.ratingSubmissions.size} items=${room.ratingItems.length} items_rated=${itemsWithRatings} golden_injected=${goldenInjected}`
     )
     room.ratingItems.forEach((item) => {
       const votes = room.roundVotes.get(item.id)
       const ratingStats = ratingsByItem.get(item.id)
       this.enqueueJokeMemory(room, item, votes, ratingStats)
     })
+  }
+
+  private injectGoldenRatings(room: GameRoom): number {
+    let injected = 0
+    room.duels.forEach((duel) => {
+      duel.goldenVoters.forEach((voterId) => {
+        const side = duel.votes.get(voterId)
+        if (!side) {
+          return
+        }
+        const authorPlayerId = side === 'left' ? duel.leftPlayerId : duel.rightPlayerId
+        const itemId = `${authorPlayerId}:${duel.promptIndex}`
+        const item = room.ratingItems.find((entry) => entry.id === itemId)
+        if (!item || item.authorPlayerId === voterId) {
+          return
+        }
+        const existing = room.ratingSubmissions.get(voterId) ?? new Map<string, number>()
+        existing.set(itemId, 10)
+        room.ratingSubmissions.set(voterId, existing)
+        injected += 1
+      })
+    })
+    return injected
   }
 
   private aggregateRatings(room: GameRoom): Map<string, { readonly average: number; readonly count: number }> {

@@ -199,7 +199,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       roomCode: body.roomCode,
       playerId: client.data.userId,
       duelId: body.duelId,
-      side: body.side
+      side: body.side,
+      golden: body.golden === true
     })
   }
 

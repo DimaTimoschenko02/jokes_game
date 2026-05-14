@@ -6,4 +6,5 @@ export type ClientDuel = {
   readonly leftAnswer: string
   readonly rightAnswer: string
   readonly votesByPlayerId: Readonly<Record<string, 'left' | 'right'>>
+  readonly goldenVoterIds: readonly string[]
 }

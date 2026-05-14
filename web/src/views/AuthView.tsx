@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactElement } from 'react'
 import { useAuth } from '../auth/auth-context'
 import type { UserGender } from '../models/user.type'
@@ -9,6 +9,57 @@ const GENDERS: readonly { readonly value: UserGender; readonly label: string }[]
   { value: 'non-binary', label: 'Небинарный' },
   { value: 'not-specified', label: 'Не указан' }
 ]
+
+const LOGIN_MIN: number = 3
+const LOGIN_MAX: number = 30
+const PASSWORD_MIN: number = 6
+const NAME_MAX: number = 80
+const LOGIN_PATTERN: RegExp = /^[a-z0-9_.-]+$/i
+
+type FormErrors = {
+  readonly login?: string
+  readonly password?: string
+  readonly realName?: string
+  readonly displayName?: string
+}
+
+const buildLoginError = (value: string): string | undefined => {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return 'Введи логин'
+  }
+  if (trimmed.length < LOGIN_MIN) {
+    return `Минимум ${LOGIN_MIN} символа (сейчас ${trimmed.length})`
+  }
+  if (trimmed.length > LOGIN_MAX) {
+    return `Максимум ${LOGIN_MAX} символов`
+  }
+  if (!LOGIN_PATTERN.test(trimmed)) {
+    return 'Только латиница, цифры и _ . -'
+  }
+  return undefined
+}
+
+const buildPasswordError = (value: string): string | undefined => {
+  if (value.length === 0) {
+    return 'Введи пароль'
+  }
+  if (value.length < PASSWORD_MIN) {
+    return `Минимум ${PASSWORD_MIN} символов (сейчас ${value.length})`
+  }
+  return undefined
+}
+
+const buildRequiredNameError = (value: string, label: string): string | undefined => {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return `Введи ${label}`
+  }
+  if (trimmed.length > NAME_MAX) {
+    return `Максимум ${NAME_MAX} символов`
+  }
+  return undefined
+}
 
 export function AuthView(): ReactElement {
   const { login: doLogin, register: doRegister } = useAuth()
@@ -21,8 +72,32 @@ export function AuthView(): ReactElement {
   const [bio, setBio] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isBusy, setIsBusy] = useState<boolean>(false)
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const [submitAttempted, setSubmitAttempted] = useState<boolean>(false)
+
+  const errors: FormErrors = useMemo(() => {
+    const result: FormErrors = {
+      login: buildLoginError(login),
+      password: buildPasswordError(password)
+    }
+    if (mode === 'register') {
+      return {
+        ...result,
+        realName: buildRequiredNameError(realName, 'имя'),
+        displayName: buildRequiredNameError(displayName, 'никнейм')
+      }
+    }
+    return result
+  }, [login, password, realName, displayName, mode])
+
+  const canSubmit: boolean = !errors.login && !errors.password && !errors.realName && !errors.displayName
+  const showError = (field: keyof FormErrors): boolean => Boolean(errors[field]) && (touched[field] || submitAttempted)
 
   const submit = async (): Promise<void> => {
+    setSubmitAttempted(true)
+    if (!canSubmit) {
+      return
+    }
     setError(null)
     setIsBusy(true)
     try {
@@ -45,10 +120,16 @@ export function AuthView(): ReactElement {
     }
   }
 
-  const canSubmit: boolean =
-    login.trim().length >= 3 &&
-    password.length >= 6 &&
-    (mode === 'login' || (realName.trim().length > 0 && displayName.trim().length > 0))
+  const handleBlur = (field: keyof FormErrors): void => {
+    setTouched((current) => ({ ...current, [field]: true }))
+  }
+
+  const switchMode = (next: 'login' | 'register'): void => {
+    setMode(next)
+    setSubmitAttempted(false)
+    setTouched({})
+    setError(null)
+  }
 
   return (
     <main className="layout">
@@ -60,14 +141,14 @@ export function AuthView(): ReactElement {
           <button
             type="button"
             className={`secondary ${mode === 'login' ? 'authTabActive' : ''}`}
-            onClick={() => setMode('login')}
+            onClick={() => switchMode('login')}
           >
             Войти
           </button>
           <button
             type="button"
             className={`secondary ${mode === 'register' ? 'authTabActive' : ''}`}
-            onClick={() => setMode('register')}
+            onClick={() => switchMode('register')}
           >
             Зарегистрироваться
           </button>
@@ -75,45 +156,53 @@ export function AuthView(): ReactElement {
 
         {error && <p className="subtitle errorText">{error}</p>}
 
-        <label className="inputGroup">
+        <label className={`inputGroup ${showError('login') ? 'inputGroupError' : ''}`}>
           <span>Логин</span>
           <input
             value={login}
             onChange={(event) => setLogin(event.target.value)}
-            maxLength={30}
-            placeholder="Минимум 3 символа"
+            onBlur={() => handleBlur('login')}
+            maxLength={LOGIN_MAX}
+            placeholder={`Минимум ${LOGIN_MIN} символа`}
           />
+          {showError('login') && <small className="fieldError">{errors.login}</small>}
         </label>
-        <label className="inputGroup">
+        <label className={`inputGroup ${showError('password') ? 'inputGroupError' : ''}`}>
           <span>Пароль</span>
           <input
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
+            onBlur={() => handleBlur('password')}
             maxLength={100}
-            placeholder="Минимум 6 символов"
+            placeholder={`Минимум ${PASSWORD_MIN} символов`}
           />
+          {showError('password') && <small className="fieldError">{errors.password}</small>}
         </label>
 
         {mode === 'register' && (
           <>
-            <label className="inputGroup">
+            <label className={`inputGroup ${showError('realName') ? 'inputGroupError' : ''}`}>
               <span>Имя (используется в шутках про тебя)</span>
               <input
                 value={realName}
                 onChange={(event) => setRealName(event.target.value)}
-                maxLength={80}
+                onBlur={() => handleBlur('realName')}
+                maxLength={NAME_MAX}
                 placeholder="Например: Дима"
               />
+              {showError('realName') && <small className="fieldError">{errors.realName}</small>}
             </label>
-            <label className="inputGroup">
+            <label className={`inputGroup ${showError('displayName') ? 'inputGroupError' : ''}`}>
               <span>Никнейм (показывается другим)</span>
               <input
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                maxLength={80}
+                onBlur={() => handleBlur('displayName')}
+                maxLength={NAME_MAX}
                 placeholder="Например: dimti"
               />
+              {showError('displayName') && <small className="fieldError">{errors.displayName}</small>}
             </label>
             <label className="inputGroup">
               <span>Пол</span>
@@ -137,7 +226,7 @@ export function AuthView(): ReactElement {
           </>
         )}
 
-        <button className="primary" disabled={!canSubmit || isBusy} onClick={submit}>
+        <button className="primary" disabled={isBusy} onClick={submit}>
           {isBusy ? 'Подождите...' : mode === 'login' ? 'Войти' : 'Создать аккаунт'}
         </button>
       </section>

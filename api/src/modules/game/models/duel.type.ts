@@ -4,5 +4,6 @@ export type Duel = {
   readonly leftPlayerId: string
   readonly rightPlayerId: string
   votes: Map<string, 'left' | 'right'>
+  goldenVoters: Set<string>
   closed: boolean
 }
