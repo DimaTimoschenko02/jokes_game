@@ -53,10 +53,19 @@ export class PromptStarterService {
     limit: number
   ): Promise<readonly { readonly text: string; readonly score: number }[]> {
     const entries = await this.repository.findGolden(limit)
+    this.trackExampleUsage(entries.map((entry) => entry._id))
     return entries.map((entry) => ({
       text: entry.text,
       score: entry.averageCompletionRating ?? 0
     }))
+  }
+
+  private trackExampleUsage(ids: readonly string[]): void {
+    void this.repository.incrementUsedAsExampleCount(ids).catch((error: unknown) => {
+      this.logger.warn(
+        `track_example_usage_failed count=${ids.length} reason="${error instanceof Error ? error.message : String(error)}"`
+      )
+    })
   }
 
   public async applyQuickFeedback(input: {
@@ -69,23 +78,27 @@ export class PromptStarterService {
   public async getNegativeOpeningExamples(
     limit: number
   ): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
-    return this.repository.findLowRatedOpenings({
+    const rows = await this.repository.findLowRatedOpenings({
       limit,
       maxFeedbackScore: -0.5,
       maxAdminScore: 2,
       minVotes: 2
     })
+    this.trackExampleUsage(rows.map((row) => row.id))
+    return rows.map(({ text, score, adminComment }) => ({ text, score, adminComment }))
   }
 
   public async getMediumOpeningExamples(
     limit: number
   ): Promise<readonly { readonly text: string; readonly score: number }[]> {
-    return this.repository.findMediumRatedOpenings({
+    const rows = await this.repository.findMediumRatedOpenings({
       limit,
       minFeedbackScore: -0.5,
       maxFeedbackScore: 0.5,
       minVotes: 1
     })
+    this.trackExampleUsage(rows.map((row) => row.id))
+    return rows.map(({ text, score }) => ({ text, score }))
   }
 
   public async getCompletionsForPrompt(promptText: string): Promise<readonly import('./models/prompt-starter-entry.type').PromptCompletion[]> {

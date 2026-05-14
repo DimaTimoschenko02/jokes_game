@@ -341,6 +341,19 @@ export class PromptStarterRepository {
     return rows.map((row) => this.toEntry(row, []))
   }
 
+  public async incrementUsedAsExampleCount(ids: readonly string[]): Promise<void> {
+    if (ids.length === 0) {
+      return
+    }
+    await this.db
+      .update(promptStarters)
+      .set({
+        usedAsExampleCount: sql`${promptStarters.usedAsExampleCount} + 1`,
+        lastUsedAsExampleAt: new Date()
+      })
+      .where(inArray(promptStarters.id, [...ids]))
+  }
+
   public async upsertGolden(input: {
     readonly text: string
     readonly averageCompletionRating: number
@@ -392,9 +405,10 @@ export class PromptStarterRepository {
     readonly maxFeedbackScore: number
     readonly maxAdminScore: number
     readonly minVotes: number
-  }): Promise<readonly { readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
+  }): Promise<readonly { readonly id: string; readonly text: string; readonly score: number; readonly adminComment?: string }[]> {
     const rows = await this.db
       .select({
+        id: promptStarters.id,
         text: promptStarters.text,
         feedbackScore: promptStarters.feedbackScore,
         adminScore: promptStarters.adminScore,
@@ -407,6 +421,7 @@ export class PromptStarterRepository {
       .orderBy(asc(promptStarters.feedbackScore), asc(promptStarters.adminScore))
       .limit(input.limit)
     return rows.map((row) => ({
+      id: row.id,
       text: row.text,
       score: row.adminScore ?? row.feedbackScore,
       adminComment: row.adminComment ?? undefined
@@ -418,9 +433,10 @@ export class PromptStarterRepository {
     readonly minFeedbackScore: number
     readonly maxFeedbackScore: number
     readonly minVotes: number
-  }): Promise<readonly { readonly text: string; readonly score: number }[]> {
+  }): Promise<readonly { readonly id: string; readonly text: string; readonly score: number }[]> {
     const rows = await this.db
       .select({
+        id: promptStarters.id,
         text: promptStarters.text,
         feedbackScore: promptStarters.feedbackScore,
         adminScore: promptStarters.adminScore
@@ -435,6 +451,7 @@ export class PromptStarterRepository {
       .orderBy(sql`random()`)
       .limit(input.limit)
     return rows.map((row) => ({
+      id: row.id,
       text: row.text,
       score: row.adminScore ?? row.feedbackScore
     }))
