@@ -25,6 +25,7 @@ import {
   RATING_PHASE_SECONDS,
   SCOREBOARD_PHASE_SECONDS,
   VOTING_PHASE_SECONDS,
+  VOTING_REVEAL_SECONDS,
   WRITING_PHASE_SECONDS
 } from './constants/game.constants'
 import { ClientDuel } from './models/client-duel.type'
@@ -49,6 +50,7 @@ import {
 } from './game.utils'
 
 type BroadcastFn = (roomCode: string) => void
+type EmitToRoomFn = (roomCode: string, eventName: string, payload?: unknown) => void
 
 const LOCAL_FALLBACK_ANSWER: string = '[NO_ANSWER]'
 
@@ -61,6 +63,7 @@ export class GameService {
   private readonly rooms: Map<string, GameRoom> = new Map<string, GameRoom>()
   private readonly socketLinks: Map<string, SocketPlayerLink> = new Map<string, SocketPlayerLink>()
   private broadcastState: BroadcastFn = () => undefined
+  private emitToRoom: EmitToRoomFn = () => undefined
   private botDuelWins: number = 0
   private botDuelTotal: number = 0
 
@@ -86,6 +89,10 @@ export class GameService {
 
   public setBroadcast(fn: BroadcastFn): void {
     this.broadcastState = fn
+  }
+
+  public setEmitToRoom(fn: EmitToRoomFn): void {
+    this.emitToRoom = fn
   }
 
   public async createRoom(input: {
@@ -122,6 +129,7 @@ export class GameService {
       submissions: new Map(),
       duels: [],
       duelIndex: 0,
+      votingRevealActive: false,
       ratingItems: [],
       ratingSubmissions: new Map(),
       roundVotes: new Map(),
@@ -178,6 +186,42 @@ export class GameService {
     player.socketId = input.socketId
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })
     this.emitRoomState(room.code)
+  }
+
+  public async leaveRoom(input: {
+    readonly socketId: string
+    readonly roomCode: string
+    readonly playerId: string
+  }): Promise<void> {
+    const room = this.rooms.get(input.roomCode)
+    if (!room) {
+      return
+    }
+    const isHost: boolean = room.hostPlayerId === input.playerId
+    if (isHost && room.phase !== 'finished') {
+      this.logger.log(
+        `room_cancelled_by_host room=${room.code} host=${input.playerId} phase=${room.phase}`
+      )
+      this.cancelRoom(room)
+      return
+    }
+    this.handleDisconnect(input.socketId)
+  }
+
+  private cancelRoom(room: GameRoom): void {
+    this.clearRoomTimer(room)
+    this.emitToRoom(room.code, 'gameCancelled', { reason: 'host-left', roomCode: room.code })
+    for (const [socketId, link] of this.socketLinks.entries()) {
+      if (link.roomCode === room.code) {
+        this.socketLinks.delete(socketId)
+      }
+    }
+    this.rooms.delete(room.code)
+    void this.cleanupSessions(room).catch((error: unknown) => {
+      this.logger.warn(
+        `cancel_room_cleanup_failed room=${room.code} reason="${error instanceof Error ? error.message : String(error)}"`
+      )
+    })
   }
 
   public handleDisconnect(socketId: string): void {
@@ -502,14 +546,36 @@ export class GameService {
     if (existingSide && input.golden && isAlreadyGolden) {
       return
     }
+    if (room.votingRevealActive) {
+      return
+    }
     duel.votes.set(input.playerId, input.side)
     if (input.golden) {
       duel.goldenVoters.add(input.playerId)
     }
     this.emitRoomState(room.code)
     if (this.hasAllVotes(room, duel)) {
-      this.advanceVoting(room.code)
+      this.scheduleVotingReveal(room.code)
     }
+  }
+
+  private scheduleVotingReveal(roomCode: string): void {
+    const room = this.rooms.get(roomCode)
+    if (!room || room.phase !== 'voting') {
+      return
+    }
+    if (room.votingRevealActive) {
+      return
+    }
+    room.votingRevealActive = true
+    this.setRoomTimer(room, VOTING_REVEAL_SECONDS, () => {
+      const r = this.rooms.get(roomCode)
+      if (r) {
+        r.votingRevealActive = false
+      }
+      this.advanceVoting(roomCode)
+    })
+    this.emitRoomState(room.code)
   }
 
   public getSessionBySocket(socketId: string): PlayerSession | null {
@@ -808,6 +874,7 @@ export class GameService {
     room.phase = 'voting'
     room.duels = createDuelsForPrompts(room)
     room.duelIndex = 0
+    room.votingRevealActive = false
     room.ratingItems = createRatingItems(room)
     this.logger.log(`voting_phase_start room=${room.code} round=${room.roundIndex} duels=${room.duels.length} rating_items=${room.ratingItems.length}`)
     this.emitRoomState(room.code)
@@ -1122,6 +1189,7 @@ export class GameService {
       currentDuel: this.toClientDuel(room, viewerPlayerId),
       duelIndex: room.phase === 'voting' ? room.duelIndex : 0,
       duelCount: room.phase === 'voting' ? room.duels.length : 0,
+      votingRevealActive: room.phase === 'voting' ? room.votingRevealActive : false,
       writingSubmitters: this.getWritingSubmitters(room),
       ratingSubmitters: this.getRatingSubmitters(room),
       ratingItems: room.ratingItems,

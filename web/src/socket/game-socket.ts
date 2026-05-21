@@ -41,11 +41,18 @@ export type SubmitOpeningFeedbackPayload = {
   readonly items: readonly { readonly promptIndex: number; readonly level: FeedbackLevel }[]
 }
 
+export type LeaveRoomPayload = {
+  readonly roomCode: string
+}
+
+export type RoomLostReason = 'not-found' | 'host-left' | 'self'
+
 type GameSocketHandlers = {
   readonly onState: (state: ClientGameState) => void
   readonly onSession: (session: PlayerSession) => void
   readonly onError: (message: string) => void
   readonly onAuthError: () => void
+  readonly onRoomLost: (reason: RoomLostReason) => void
 }
 
 export class GameSocket {
@@ -76,6 +83,12 @@ export class GameSocket {
       handlers.onError(message)
     })
     this.socket.on('authError', () => handlers.onAuthError())
+    this.socket.on('roomNotFound', () => handlers.onRoomLost('not-found'))
+    this.socket.on('gameCancelled', () => handlers.onRoomLost('host-left'))
+  }
+
+  public executeLeaveRoom(payload: LeaveRoomPayload): void {
+    this.socket.emit('leaveRoom', payload)
   }
 
   public executeCreateRoom(payload: CreateRoomPayload): void {

@@ -732,6 +732,35 @@ button:disabled {
   color: var(--self-mark);
 }
 
+.voteOptionAuthor {
+  margin-left: 8px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+.voteRevealBar {
+  height: 6px;
+  margin: 12px 0 18px;
+  background: var(--card-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.voteRevealBarFill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #ffd86b, #ff7a3d);
+  transform-origin: right center;
+  animation: voteRevealCountdown 5s linear forwards;
+}
+
+@keyframes voteRevealCountdown {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 .voteOptionBody {
   font-size: 15px;
   line-height: 1.35;

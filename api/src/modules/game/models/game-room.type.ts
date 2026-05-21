@@ -33,6 +33,7 @@ export type GameRoom = {
   submissions: Map<string, Submission>
   duels: Duel[]
   duelIndex: number
+  votingRevealActive: boolean
   ratingItems: RatingItem[]
   ratingSubmissions: Map<string, Map<string, number>>
   roundVotes: Map<string, { readonly votesFor: number; readonly votesAgainst: number }>

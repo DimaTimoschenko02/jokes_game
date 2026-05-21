@@ -5,6 +5,7 @@ export const BOT_COUNT_MIN: number = 1
 export const BOT_COUNT_MAX: number = 2
 export const WRITING_PHASE_SECONDS: number = 360
 export const VOTING_PHASE_SECONDS: number = 35
+export const VOTING_REVEAL_SECONDS: number = 5
 export const RATING_PHASE_SECONDS: number = 30
 export const SCOREBOARD_PHASE_SECONDS: number = 8
 export const PLAYER_NAME_MAX_LENGTH: number = 30
