@@ -6,6 +6,7 @@ import {
   type CastVotePayload,
   type CreateRoomPayload,
   type JoinRoomPayload,
+  type RoomLostReason,
   type StartGamePayload,
   type SubmitAnswersPayload,
   type SubmitOpeningFeedbackPayload,
@@ -71,7 +72,19 @@ export const useGameClient = (input: {
           setErrorMessage(null)
         },
         onError: (message) => setErrorMessage(message),
-        onAuthError: () => onAuthErrorRef.current()
+        onAuthError: () => onAuthErrorRef.current(),
+        onRoomLost: (reason: RoomLostReason) => {
+          window.localStorage.removeItem(SESSION_KEY)
+          setSession(null)
+          setGameState(null)
+          setErrorMessage(
+            reason === 'host-left'
+              ? 'Хост покинул игру'
+              : reason === 'self'
+                ? null
+                : 'Комната больше не существует'
+          )
+        }
       },
       { token: input.token, session }
     )
@@ -84,6 +97,9 @@ export const useGameClient = (input: {
       session,
       errorMessage,
       executeLeaveRoom: () => {
+        if (session?.roomCode) {
+          socketRef.current?.executeLeaveRoom({ roomCode: session.roomCode })
+        }
         socketRef.current?.executeDisconnect()
         window.localStorage.removeItem(SESSION_KEY)
         setSession(null)

@@ -151,7 +151,11 @@ function App(): ReactElement {
         session.playerId === gameState.currentDuel.rightPlayerId)
   )
   const canVoteCurrentDuel = Boolean(
-    gameState?.phase === 'voting' && gameState.currentDuel && !isDuelParticipant && !myVoteIsGolden
+    gameState?.phase === 'voting' &&
+      gameState.currentDuel &&
+      !isDuelParticipant &&
+      !myVoteIsGolden &&
+      !gameState.votingRevealActive
   )
   const showVoteBreakdown = Boolean(
     gameState?.currentDuel &&
@@ -664,8 +668,15 @@ function App(): ReactElement {
             </p>
             {isDuelParticipant ? (
               <p className="subtitle voteHint">Вы участвуете в этой дуэли — голосуют только зрители.</p>
+            ) : hasVotedCurrentDuel ? (
+              <p className="subtitle voteHint">Авторы раскрыты — голосование запомнено.</p>
             ) : (
               <p className="subtitle voteHint">Варианты без имён — так объективнее.</p>
+            )}
+            {gameState.votingRevealActive && (
+              <div className="voteRevealBar" aria-hidden="true">
+                <div className="voteRevealBarFill" />
+              </div>
             )}
             <h2 className="duelPrompt">{gameState.currentDuel.prompt}</h2>
             {hasVotedCurrentDuel && myVoteSide && !isDuelParticipant && (
@@ -685,6 +696,7 @@ function App(): ReactElement {
                   .map(([voterId]) => voterId)
                 const goldenSet = new Set(gameState.currentDuel!.goldenVoterIds)
                 const sideClickable = canVoteCurrentDuel && (!hasVotedCurrentDuel || myVoteSide === side)
+                const authorRevealed: boolean = hasVotedCurrentDuel || isDuelParticipant
                 return (
                   <div key={side} className="duelColumn">
                     <button
@@ -694,7 +706,12 @@ function App(): ReactElement {
                       onClick={() => handleVote(side)}
                     >
                       <span className="voteOptionMeta">
-                        <span className="voteOptionTag">{isLeft ? 'Вариант A' : 'Вариант B'}</span>
+                        <span className="voteOptionTag">
+                          {isLeft ? 'Вариант A' : 'Вариант B'}
+                          {authorRevealed && (
+                            <span className="voteOptionAuthor"> · {getPlayerNameById(gameState.players, sidePlayerId)}</span>
+                          )}
+                        </span>
                         {isMyAnswer ? <span className="voteSelfMark">Ваш ответ</span> : null}
                       </span>
                       <span className="voteOptionBody">{answer}</span>

@@ -12,6 +12,7 @@ import {
   createOpeningGenerationUserPrompt
 } from './prompts/prompt-templates'
 import spawn from 'cross-spawn'
+import { detectClaudeOutputError } from '../claude-agent/claude-output-validation'
 
 const CLAUDE_MODEL: string = process.env.CLAUDE_MODEL ?? 'sonnet'
 const CLAUDE_EFFORT: string = process.env.CLAUDE_EFFORT ?? 'high'
@@ -263,6 +264,14 @@ export class AiService {
         }
 
         const text = this.parseClaudeResponse(stdout)
+        const errorSnippet: string | null = detectClaudeOutputError(text)
+        if (errorSnippet !== null) {
+          this.logger.warn(
+            `claude_error_response_detected id=${requestId} elapsed_ms=${elapsedMs} snippet="${errorSnippet}"`
+          )
+          resolve('')
+          return
+        }
         this.logger.log(`claude_response id=${requestId} elapsed_ms=${elapsedMs} content="${text.slice(0, 150)}"`)
         resolve(text)
       })

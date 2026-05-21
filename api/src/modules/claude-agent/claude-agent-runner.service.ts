@@ -14,6 +14,7 @@ import {
 } from './models/agent-errors'
 import { AgentResponse, AgentUsage } from './models/agent-response.type'
 import { AgentSession } from './models/agent-session.type'
+import { detectClaudeOutputError } from './claude-output-validation'
 
 const CLAUDE_CLI_BINARY: string = 'claude'
 const WORKING_DIR: string = tmpdir()
@@ -242,6 +243,17 @@ export class ClaudeAgentRunnerService {
           if (cliResult.is_error) {
             reject(
               new AgentInvocationError(`Claude returned error: ${cliResult.result}`, stderrText, exitCode)
+            )
+            return
+          }
+          const errorSnippet: string | null = detectClaudeOutputError(cliResult.result)
+          if (errorSnippet !== null) {
+            reject(
+              new AgentInvocationError(
+                `Claude output looks like an error response: ${errorSnippet}`,
+                stderrText,
+                exitCode
+              )
             )
             return
           }

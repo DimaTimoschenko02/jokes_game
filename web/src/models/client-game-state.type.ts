@@ -15,6 +15,7 @@ export type ClientGameState = {
   readonly currentDuel: ClientDuel | null
   readonly duelIndex: number
   readonly duelCount: number
+  readonly votingRevealActive: boolean
   readonly writingSubmitters: readonly string[]
   readonly ratingSubmitters: readonly string[]
   readonly ratingItems: readonly RatingItem[]

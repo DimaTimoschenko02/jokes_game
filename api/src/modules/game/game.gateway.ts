@@ -16,6 +16,7 @@ import { UserRepository } from '../user/user.repository'
 import { CastVoteDto } from './dto/cast-vote.dto'
 import { CreateRoomDto } from './dto/create-room.dto'
 import { JoinRoomDto } from './dto/join-room.dto'
+import { LeaveRoomDto } from './dto/leave-room.dto'
 import { StartGameDto } from './dto/start-game.dto'
 import { SubmitAnswersDto } from './dto/submit-answers.dto'
 import { SubmitOpeningFeedbackDto } from './dto/submit-feedback.dto'
@@ -67,6 +68,9 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.gameService.setBroadcast((roomCode) => {
       void this.emitPersonalizedGameState(roomCode)
     })
+    this.gameService.setEmitToRoom((roomCode, eventName, payload) => {
+      this.server.to(roomCode).emit(eventName, payload)
+    })
   }
 
   public afterInit(server: Server): void {
@@ -117,6 +121,7 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       this.logger.warn(
         `reconnect_failed socket=${client.id} room=${roomCode} user=${userId} error=${error instanceof Error ? error.message : String(error)}`
       )
+      client.emit('roomNotFound', { roomCode })
     }
   }
 
@@ -164,6 +169,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     client.join(session.roomCode)
     client.emit('session', session)
     client.emit('gameState', this.gameService.getStateForPlayer(session.roomCode, session.playerId))
+  }
+
+  @SubscribeMessage('leaveRoom')
+  public async leaveRoom(
+    @ConnectedSocket() client: SocketWithUser,
+    @MessageBody() body: LeaveRoomDto
+  ): Promise<void> {
+    await this.gameService.leaveRoom({
+      socketId: client.id,
+      roomCode: body.roomCode,
+      playerId: client.data.userId
+    })
   }
 
   @SubscribeMessage('startGame')
