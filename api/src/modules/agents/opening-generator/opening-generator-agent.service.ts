@@ -40,6 +40,7 @@ export type StartOpeningGeneratorInput = {
   readonly golden: readonly GoldenOpeningExample[]
   readonly medium: readonly MediumOpeningExample[]
   readonly negative: readonly NegativeOpeningExample[]
+  readonly groupMemory?: string
   readonly needed: number
 }
 
@@ -96,6 +97,10 @@ export class OpeningGeneratorAgentService {
       lines.push(this.formatPlayerProfile(player))
     }
     lines.push('')
+    if (input.groupMemory) {
+      lines.push(input.groupMemory)
+      lines.push('')
+    }
     if (input.golden.length > 0) {
       lines.push('GOLDEN — opening\'и, которые залетали лучше всего. Пиши в этом духе, повторяй их структуру и тёмность:')
       for (const example of input.golden) {

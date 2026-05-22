@@ -289,7 +289,12 @@ export class GameService {
     await Promise.all(
       botPlayers.map(async (bot) => {
         try {
-          const result = await this.botAgent.startForBot(room.code, bot.id, profiles)
+          const result = await this.botAgent.startForBot(
+            room.code,
+            bot.id,
+            profiles,
+            room.groupMemoryBlock ?? undefined
+          )
           room.sessions.botSessions.set(bot.id, {
             session: result.session
           })
@@ -419,6 +424,7 @@ export class GameService {
         golden,
         medium,
         negative,
+        groupMemory: room.groupMemoryBlock ?? undefined,
         needed
       })
       room.sessions.openingGenerator = result.session

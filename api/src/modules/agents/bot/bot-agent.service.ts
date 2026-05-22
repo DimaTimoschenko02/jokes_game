@@ -39,9 +39,10 @@ export class BotAgentService {
   public async startForBot(
     roomCode: string,
     botId: string,
-    players: readonly BotPlayerProfile[]
+    players: readonly BotPlayerProfile[],
+    groupMemory?: string
   ): Promise<BotStartResult> {
-    const initialPrompt: string = this.buildInitialPrompt(players)
+    const initialPrompt: string = this.buildInitialPrompt(players, groupMemory)
     const { session } = await this.runner.start<never>(BOT_AGENT_CONFIG, initialPrompt)
     this.logger.log(`bot_start room=${roomCode} bot=${botId} session=${session.id}`)
     return { session }
@@ -72,16 +73,22 @@ export class BotAgentService {
     }
   }
 
-  private buildInitialPrompt(players: readonly BotPlayerProfile[]): string {
+  private buildInitialPrompt(
+    players: readonly BotPlayerProfile[],
+    groupMemory?: string
+  ): string {
     const profileLines: string[] = players.map((player) => this.formatPlayerProfile(player))
-    return [
-      'За этим столом сегодня играют:',
-      ...profileLines,
+    const lines: string[] = ['За этим столом сегодня играют:', ...profileLines]
+    if (groupMemory) {
+      lines.push('', groupMemory)
+    }
+    lines.push(
       '',
       'Это весь состав. Ниже я буду присылать setup\'ы шуток — пиши на каждый ровно ОДНУ строку с твоим лучшим punchline. Без вариантов, без markdown, без кавычек, без объяснений.',
       '',
       'Сейчас подтверди готовность одним словом "готов" и жди setup.'
-    ].join('\n')
+    )
+    return lines.join('\n')
   }
 
   private formatPlayerProfile(player: BotPlayerProfile): string {
