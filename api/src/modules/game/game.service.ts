@@ -22,6 +22,7 @@ import {
   ROUND_COUNT_DEFAULT,
   ROUND_COUNT_MAX,
   ROUND_COUNT_MIN,
+  ROUND_VOTE_WEIGHTS,
   RATING_PHASE_SECONDS,
   SCOREBOARD_PHASE_SECONDS,
   VOTING_PHASE_SECONDS,
@@ -937,11 +938,53 @@ export class GameService {
     duel.closed = true
     const leftVotes = this.countVotes(duel.votes, 'left')
     const rightVotes = this.countVotes(duel.votes, 'right')
-    this.addScoreToWinners(room, duel.leftPlayerId, leftVotes)
-    this.addScoreToWinners(room, duel.rightPlayerId, rightVotes)
+    const points = this.computeDuelPoints(room, duel, leftVotes, rightVotes)
+    this.addScore(room, duel.leftPlayerId, points.left)
+    this.addScore(room, duel.rightPlayerId, points.right)
     this.trackBotDuelMetrics(room, duel.leftPlayerId, duel.rightPlayerId, leftVotes, rightVotes)
     this.maybeLogBotMetrics()
     this.recordRoundVotes(room, duel.promptIndex, duel.leftPlayerId, duel.rightPlayerId, leftVotes, rightVotes)
+  }
+
+  private computeDuelPoints(
+    room: GameRoom,
+    duel: { readonly leftPlayerId: string; readonly rightPlayerId: string },
+    leftVotes: number,
+    rightVotes: number
+  ): { readonly left: number; readonly right: number } {
+    const votedCount = leftVotes + rightVotes
+    if (votedCount === 0) {
+      return { left: 0, right: 0 }
+    }
+    const weight = this.voteWeightForRound(room.roundIndex)
+    const eligibleCount = this.countEligibleVoters(room, duel)
+    const abstainCount = Math.max(0, eligibleCount - votedCount)
+    const abstainPool = abstainCount * weight
+    const leftAbstainShare = Math.round((abstainPool * leftVotes) / votedCount)
+    const rightAbstainShare = abstainPool - leftAbstainShare
+    return {
+      left: leftVotes * weight + leftAbstainShare,
+      right: rightVotes * weight + rightAbstainShare
+    }
+  }
+
+  private countEligibleVoters(
+    room: GameRoom,
+    duel: { readonly leftPlayerId: string; readonly rightPlayerId: string }
+  ): number {
+    let count = 0
+    for (const player of room.players.values()) {
+      if (!player.isBot && this.canPlayerVote(duel, player.id)) {
+        count += 1
+      }
+    }
+    return count
+  }
+
+  private voteWeightForRound(roundIndex: number): number {
+    const maxIndex = ROUND_VOTE_WEIGHTS.length
+    const clamped = Math.min(Math.max(roundIndex, 1), maxIndex)
+    return ROUND_VOTE_WEIGHTS[clamped - 1]
   }
 
   private startRatingPhase(room: GameRoom): void {
@@ -1349,7 +1392,7 @@ export class GameService {
     return count
   }
 
-  private addScoreToWinners(room: GameRoom, playerId: string, points: number): void {
+  private addScore(room: GameRoom, playerId: string, points: number): void {
     const player = room.players.get(playerId)
     if (!player || points <= 0) {
       return
