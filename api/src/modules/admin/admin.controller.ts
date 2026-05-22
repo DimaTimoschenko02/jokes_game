@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards
 } from '@nestjs/common'
+import { GroupMemoryService } from '../group-memory/group-memory.service'
 import { JokeMemoryRepository } from '../joke-memory/joke-memory.repository'
 import { PromptStarterEntry } from '../prompt-starter/models/prompt-starter-entry.type'
 import { PromptStarterRepository } from '../prompt-starter/prompt-starter.repository'
@@ -67,7 +68,8 @@ const normalizeOrder = (value: string | undefined): 'asc' | 'desc' => (value ===
 export class AdminController {
   public constructor(
     private readonly promptRepository: PromptStarterRepository,
-    private readonly jokeRepository: JokeMemoryRepository
+    private readonly jokeRepository: JokeMemoryRepository,
+    private readonly groupMemoryService: GroupMemoryService
   ) {}
 
   @Post('login')
@@ -327,6 +329,35 @@ export class AdminController {
   @UseGuards(AdminGuard)
   public async deleteJoke(@Param('id') id: string): Promise<{ ok: boolean }> {
     await this.jokeRepository.deleteById(id)
+    return { ok: true }
+  }
+
+  @Get('group-memory')
+  @UseGuards(AdminGuard)
+  public async getGroupMemory(): Promise<Record<string, unknown>> {
+    const row = await this.groupMemoryService.getAdminView()
+    return {
+      themes: row.themes,
+      inJokes: row.inJokes,
+      triggers: row.triggers,
+      avoidedThemes: row.avoidedThemes,
+      setupPatterns: row.setupPatterns,
+      summaryText: row.summaryText,
+      gamesProcessed: row.gamesProcessed,
+      summaryRefreshedAtGame: row.summaryRefreshedAtGame,
+      memoryEnabled: row.memoryEnabled,
+      updatedAt: row.updatedAt
+    }
+  }
+
+  @Patch('group-memory')
+  @UseGuards(AdminGuard)
+  public async updateGroupMemory(
+    @Body() body: { memoryEnabled?: boolean }
+  ): Promise<{ ok: boolean }> {
+    if (typeof body.memoryEnabled === 'boolean') {
+      await this.groupMemoryService.setMemoryEnabled(body.memoryEnabled)
+    }
     return { ok: true }
   }
 
