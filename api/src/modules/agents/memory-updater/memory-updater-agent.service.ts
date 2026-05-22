@@ -4,6 +4,7 @@ import { AgentSession } from '../../claude-agent/models/agent-session.type'
 import { MEMORY_UPDATER_AGENT_CONFIG } from '../configs/memory-updater-agent.config'
 import { RoundStats } from './models/round-stats.type'
 import { MemoryUpdaterOutput } from './models/user-memory-delta.type'
+import { GroupMemoryDelta } from '../../group-memory/models/group-memory-delta.type'
 import { UserMemorySnapshot } from './models/user-memory-snapshot.type'
 
 export type MemoryUpdaterStartResult = {
@@ -45,6 +46,44 @@ export class MemoryUpdaterAgentService {
       `memory_updater_round session=${session.id} round=${stats.roundIndex} users_updated=${Object.keys(updates.updates).length}`
     )
     return updates
+  }
+
+  public async finalizeGroupMemory(
+    session: AgentSession<MemoryUpdaterOutput>,
+    input: { readonly currentText: string; readonly summaryRequested: boolean }
+  ): Promise<GroupMemoryDelta> {
+    const userPrompt: string = this.buildGroupFinalizePrompt(input)
+    const response = await this.runner.continue<MemoryUpdaterOutput>(session, userPrompt)
+    const delta: GroupMemoryDelta = response.parsed?.groupMemoryDelta ?? {}
+    this.logger.log(
+      `memory_updater_group_finalize session=${session.id} themes=${delta.themesDelta?.length ?? 0} inJokes=${delta.inJokesDelta?.length ?? 0} summary=${delta.newSummaryText ? 'yes' : 'no'}`
+    )
+    return delta
+  }
+
+  private buildGroupFinalizePrompt(input: {
+    readonly currentText: string
+    readonly summaryRequested: boolean
+  }): string {
+    const lines: string[] = [
+      'Игра завершена. Ты видел все раунды этой игры выше.',
+      'Обнови ПАМЯТЬ КОМПАНИИ — общий контекст про этих людей как компанию.',
+      '',
+      '# Текущая память компании:',
+      input.currentText,
+      '',
+      'Верни JSON: {"updates": {}, "groupMemoryDelta": { ... }}.',
+      '- updates оставь пустым объектом {} — память игроков уже обновлена по раундам.',
+      '- groupMemoryDelta — только ИЗМЕНЕНИЯ относительно текущей памяти компании выше.'
+    ]
+    if (input.summaryRequested) {
+      lines.push(
+        '- Также верни newSummaryText: 4-8 предложений свободного саммари про компанию (то, что не лезет в структурные поля). Не повторяй дословно то, что уже в themes/inJokes/triggers.'
+      )
+    } else {
+      lines.push('- newSummaryText НЕ возвращай в этот раз.')
+    }
+    return lines.join('\n')
   }
 
   private buildFirstRoundPrompt(
