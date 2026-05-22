@@ -1,3 +1,5 @@
+import { GroupMemoryDelta } from '../../../group-memory/models/group-memory-delta.type'
+
 export type ThemeDelta = {
   readonly theme: string
   readonly confidenceDelta?: number
@@ -26,4 +28,5 @@ export type UserMemoryDelta = {
 
 export type MemoryUpdaterOutput = {
   readonly updates: Readonly<Record<string, UserMemoryDelta>>
+  readonly groupMemoryDelta?: GroupMemoryDelta
 }

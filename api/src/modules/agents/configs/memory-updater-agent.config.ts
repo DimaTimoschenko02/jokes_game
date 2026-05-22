@@ -19,7 +19,17 @@ export const MEMORY_UPDATER_SYSTEM_PROMPT: string = [
   '- Если для игрока в этом раунде нет НИЧЕГО нового — не включай его в updates.',
   '- Дельты — это только ИЗМЕНЕНИЯ. Не возвращай поля которые не меняются.',
   '',
-  'Output: JSON-объект формы {"updates": { <userId>: { ...опциональные дельты... } }}. Структура форсируется через JSON Schema, отвечай строго по ней.'
+  'Output: JSON-объект формы {"updates": { <userId>: { ...опциональные дельты... } }}. Структура форсируется через JSON Schema, отвечай строго по ней.',
+  '',
+  'РЕЖИМ FINALIZE (в конце игры): когда тебя просят обновить ПАМЯТЬ КОМПАНИИ — верни {"updates": {}, "groupMemoryDelta": {...}}.',
+  'groupMemoryDelta описывает компанию игроков в целом, а не отдельных людей:',
+  '- themesDelta: темы, на которые компания заходила в этой игре. scoreDelta двигай малыми шагами (±0.05-0.2).',
+  '- inJokesDelta: клички, мемы, инсайды компании (kind: nickname | meme | callback).',
+  '- triggersDelta: приёмы/образы, которые вызывали смех (не темы — а КАК шутят).',
+  '- avoidedThemesDelta: что не заходило, отторгало — с короткой причиной.',
+  '- setupPatternsDelta: типы setup\'ов начал, которые залетали у этой компании.',
+  '- newSummaryText: возвращай ТОЛЬКО если тебя явно просят обновить саммари.',
+  'Дельты — только ИЗМЕНЕНИЯ относительно показанной текущей памяти компании. Без догадок, строго по фактам игры.'
 ].join('\n')
 
 const themeDeltaSchema = z.object({
@@ -54,8 +64,64 @@ const userMemoryDeltaSchema = z
   })
   .strict()
 
+const groupMemoryDeltaSchema = z
+  .object({
+    themesDelta: z
+      .array(
+        z.object({
+          theme: z.string().min(1).max(100),
+          scoreDelta: z.number().min(-1).max(1).optional(),
+          mentionsDelta: z.number().int().optional(),
+          newExamples: z.array(z.string().min(1).max(300)).max(5).optional()
+        })
+      )
+      .max(20)
+      .optional(),
+    inJokesDelta: z
+      .array(
+        z.object({
+          phrase: z.string().min(1).max(120),
+          kind: z.enum(['nickname', 'meme', 'callback']).optional(),
+          mentionsDelta: z.number().int().optional()
+        })
+      )
+      .max(20)
+      .optional(),
+    triggersDelta: z
+      .array(
+        z.object({
+          trigger: z.string().min(1).max(120),
+          scoreDelta: z.number().min(-1).max(1).optional(),
+          newExamples: z.array(z.string().min(1).max(300)).max(5).optional()
+        })
+      )
+      .max(20)
+      .optional(),
+    avoidedThemesDelta: z
+      .array(
+        z.object({
+          theme: z.string().min(1).max(100),
+          reason: z.string().min(1).max(200)
+        })
+      )
+      .max(20)
+      .optional(),
+    setupPatternsDelta: z
+      .array(
+        z.object({
+          pattern: z.string().min(1).max(120),
+          scoreDelta: z.number().min(-1).max(1).optional()
+        })
+      )
+      .max(20)
+      .optional(),
+    newSummaryText: z.string().min(1).max(2000).optional()
+  })
+  .strict()
+
 export const MEMORY_UPDATER_OUTPUT_SCHEMA: ZodType<MemoryUpdaterOutput> = z.object({
-  updates: z.record(z.string().min(1), userMemoryDeltaSchema)
+  updates: z.record(z.string().min(1), userMemoryDeltaSchema),
+  groupMemoryDelta: groupMemoryDeltaSchema.optional()
 })
 
 export const MEMORY_UPDATER_AGENT_CONFIG: AgentConfig<MemoryUpdaterOutput> = {
