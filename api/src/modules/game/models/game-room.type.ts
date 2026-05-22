@@ -44,6 +44,7 @@ export type GameRoom = {
   aiStatus: 'idle' | 'generating' | 'ready'
   sessions: GameRoomSessions
   userMemorySnapshots: readonly UserMemorySnapshot[]
+  groupMemoryBlock: string | null
   memoryDeltasLog: MemoryUpdaterOutput[]
   memoryUpdaterInFlight: Promise<void> | null
 }

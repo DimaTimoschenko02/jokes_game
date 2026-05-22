@@ -36,6 +36,7 @@ import { PlayerSession } from './models/player-session.type'
 import { SocketPlayerLink } from './models/socket-player-link.type'
 import { UserProfile } from '../user/models/user-profile.type'
 import { UserMemoryService } from '../user/user-memory.service'
+import { GroupMemoryService } from '../group-memory/group-memory.service'
 import {
   buildCircularPromptAssignments,
   buildPlayerContext,
@@ -76,7 +77,8 @@ export class GameService {
     private readonly openingSelection: OpeningSelectionService,
     private readonly memoryUpdaterAgent: MemoryUpdaterAgentService,
     private readonly claudeRunner: ClaudeAgentRunnerService,
-    private readonly userMemoryService: UserMemoryService
+    private readonly userMemoryService: UserMemoryService,
+    private readonly groupMemoryService: GroupMemoryService
   ) {}
 
   private createEmptySessions(): GameRoomSessions {
@@ -141,6 +143,7 @@ export class GameService {
       aiStatus: 'idle',
       sessions: this.createEmptySessions(),
       userMemorySnapshots: [],
+      groupMemoryBlock: null,
       memoryDeltasLog: [],
       memoryUpdaterInFlight: null
     }
@@ -265,6 +268,7 @@ export class GameService {
         await room.prefetchOpeningsPromise.catch(() => undefined)
       }
       room.userMemorySnapshots = await this.buildUserMemorySnapshots(room)
+      room.groupMemoryBlock = await this.groupMemoryService.getPromptBlock()
       await this.prewarmBotSessions(room)
       await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
@@ -1170,10 +1174,57 @@ export class GameService {
       this.logger.log(`game_finished room=${room.code} rounds=${room.roundCount} final_scores=[${totals}]`)
       this.emitRoomState(room.code)
       this.evaluateAndSaveGoldenOpenings(room)
-      void this.cleanupSessions(room)
+      void this.finalizeGroupMemoryAndCleanup(room)
       return
     }
     void this.startWritingPhase(room.code)
+  }
+
+  private async finalizeGroupMemoryAndCleanup(room: GameRoom): Promise<void> {
+    try {
+      await this.finalizeGroupMemory(room)
+    } finally {
+      await this.cleanupSessions(room)
+    }
+  }
+
+  private async finalizeGroupMemory(room: GameRoom): Promise<void> {
+    if (!this.countsForGroupMemory(room)) {
+      this.logger.log(`group_memory_finalize_skip room=${room.code} reason=test_game`)
+      return
+    }
+    if (room.memoryUpdaterInFlight) {
+      await room.memoryUpdaterInFlight.catch(() => undefined)
+    }
+    const session = room.sessions.memoryUpdater
+    if (!session) {
+      this.logger.warn(`group_memory_finalize_skip room=${room.code} reason=no_session`)
+      return
+    }
+    try {
+      const context = await this.groupMemoryService.getFinalizeContext()
+      const delta = await this.memoryUpdaterAgent.finalizeGroupMemory(session, context)
+      await this.groupMemoryService.applyDelta(delta)
+      this.logger.log(
+        `group_memory_finalize_ok room=${room.code} summary_requested=${context.summaryRequested}`
+      )
+    } catch (error: unknown) {
+      this.logger.warn(
+        `group_memory_finalize_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }
+
+  private countsForGroupMemory(room: GameRoom): boolean {
+    if (!room.collectData) {
+      return false
+    }
+    for (const player of room.players.values()) {
+      if (!player.isBot && player.isTestAccount) {
+        return false
+      }
+    }
+    return true
   }
 
   private toClientState(room: GameRoom, viewerPlayerId: string): ClientGameState {
