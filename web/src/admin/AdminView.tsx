@@ -4,6 +4,7 @@ import { useAuth } from '../auth/auth-context'
 import { ScoreScale } from '../components/ScoreScale'
 import {
   adminApi,
+  type GroupMemoryView,
   type JokeListItem,
   type ListJokesQuery,
   type ListPromptsQuery,
@@ -13,7 +14,7 @@ import {
   type YesNoFilter
 } from './admin-api'
 
-type AdminTab = 'prompts' | 'jokes'
+type AdminTab = 'prompts' | 'jokes' | 'group'
 
 const PAGE_SIZE_OPTIONS: readonly number[] = [15, 30, 50, 100]
 
@@ -94,9 +95,18 @@ export function AdminView({ onBack }: { readonly onBack: () => void }): ReactEle
           >
             Шутки
           </button>
+          <button
+            type="button"
+            className={tab === 'group' ? 'primary' : 'secondary'}
+            onClick={() => setTab('group')}
+          >
+            Память компании
+          </button>
         </div>
         <div className="divider" />
-        {tab === 'prompts' ? <PromptsTab token={token} /> : <JokesTab token={token} />}
+        {tab === 'prompts' && <PromptsTab token={token} />}
+        {tab === 'jokes' && <JokesTab token={token} />}
+        {tab === 'group' && <GroupMemoryTab token={token} />}
       </section>
     </main>
   )
@@ -285,6 +295,125 @@ function JokesTab({ token }: { readonly token: string }): ReactElement {
         totalPages={totalPages}
         onChange={(p) => setQuery({ ...query, page: p })}
       />
+    </div>
+  )
+}
+
+function GroupMemoryTab({ token }: { readonly token: string }): ReactElement {
+  const [data, setData] = useState<GroupMemoryView | null>(null)
+  const [loading, setLoading] = useState<boolean>(false)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState<boolean>(false)
+
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      setData(await adminApi.getGroupMemory(token))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [token])
+
+  useEffect(() => { void load() }, [load])
+
+  const toggleEnabled = async (): Promise<void> => {
+    if (!data) {
+      return
+    }
+    setSaving(true)
+    try {
+      await adminApi.updateGroupMemory(token, { memoryEnabled: !data.memoryEnabled })
+      await load()
+    } catch (e) {
+      alert(`Ошибка: ${(e as Error).message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <p className="subtitle">Загрузка...</p>
+  }
+  if (error) {
+    return <p className="errorText">{error}</p>
+  }
+  if (!data) {
+    return <p className="subtitle">Нет данных</p>
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="phaseBlock">
+        <div className="row" style={{ alignItems: 'center', gap: 8 }}>
+          <Chip tone={data.memoryEnabled ? 'positive' : 'negative'}>
+            {data.memoryEnabled ? 'Память ВКЛючена' : 'Память ВЫКЛючена'}
+          </Chip>
+          <button type="button" className="secondary" disabled={saving} onClick={toggleEnabled}>
+            {data.memoryEnabled ? 'Выключить' : 'Включить'}
+          </button>
+        </div>
+        <p className="subtitle" style={{ marginTop: 6 }}>
+          Игр обработано: {data.gamesProcessed} · саммари обновлено на игре {data.summaryRefreshedAtGame}
+        </p>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Темы</h3>
+        <div className="adminChips">
+          {data.themes.length === 0 && <span className="subtitle">пусто</span>}
+          {data.themes.map((t) => (
+            <Chip key={t.theme}>{t.theme} <strong>{t.score.toFixed(2)}</strong> (m{t.mentions})</Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Клички и инсайды</h3>
+        <div className="adminChips">
+          {data.inJokes.length === 0 && <span className="subtitle">пусто</span>}
+          {data.inJokes.map((j) => (
+            <Chip key={j.phrase}>{j.phrase} <strong>{j.kind}</strong> (m{j.mentions})</Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Триггеры</h3>
+        <div className="adminChips">
+          {data.triggers.length === 0 && <span className="subtitle">пусто</span>}
+          {data.triggers.map((t) => (
+            <Chip key={t.trigger}>{t.trigger} <strong>{t.score.toFixed(2)}</strong></Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Избегать</h3>
+        <div className="adminChips">
+          {data.avoidedThemes.length === 0 && <span className="subtitle">пусто</span>}
+          {data.avoidedThemes.map((t) => (
+            <Chip key={t.theme} tone="negative">{t.theme} — {t.reason}</Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Setup-паттерны</h3>
+        <div className="adminChips">
+          {data.setupPatterns.length === 0 && <span className="subtitle">пусто</span>}
+          {data.setupPatterns.map((s) => (
+            <Chip key={s.pattern}>{s.pattern} <strong>{s.score.toFixed(2)}</strong></Chip>
+          ))}
+        </div>
+      </div>
+
+      <div className="phaseBlock">
+        <h3 style={{ marginTop: 0 }}>Саммари</h3>
+        <p className="subtitle">{data.summaryText && data.summaryText.trim().length > 0 ? data.summaryText : 'пусто'}</p>
+      </div>
     </div>
   )
 }

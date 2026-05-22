@@ -23,6 +23,19 @@ export type PromptListItem = {
   readonly lastUsedAsExampleAt: string | null
 }
 
+export type GroupMemoryView = {
+  readonly themes: readonly { theme: string; score: number; mentions: number; examples: readonly string[] }[]
+  readonly inJokes: readonly { phrase: string; kind: string; mentions: number }[]
+  readonly triggers: readonly { trigger: string; score: number; examples: readonly string[] }[]
+  readonly avoidedThemes: readonly { theme: string; reason: string }[]
+  readonly setupPatterns: readonly { pattern: string; score: number }[]
+  readonly summaryText: string | null
+  readonly gamesProcessed: number
+  readonly summaryRefreshedAtGame: number
+  readonly memoryEnabled: boolean
+  readonly updatedAt: string
+}
+
 export type JokeListItem = {
   readonly id: string
   readonly prompt: string
@@ -208,5 +221,11 @@ export const adminApi = {
   },
   deleteJoke(token: string, id: string): Promise<{ ok: boolean }> {
     return request(`/api/admin/jokes/${id}`, { method: 'DELETE', token })
+  },
+  getGroupMemory(token: string): Promise<GroupMemoryView> {
+    return request(`/api/admin/group-memory`, { method: 'GET', token })
+  },
+  updateGroupMemory(token: string, body: { memoryEnabled: boolean }): Promise<{ ok: boolean }> {
+    return request(`/api/admin/group-memory`, { method: 'PATCH', body, token })
   }
 }
