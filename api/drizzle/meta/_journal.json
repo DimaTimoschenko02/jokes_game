@@ -50,6 +50,13 @@
       "when": 1778831000000,
       "tag": "0006_fallback_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1779395844429,
+      "tag": "0007_sturdy_captain_britain",
+      "breakpoints": true
     }
   ]
 }

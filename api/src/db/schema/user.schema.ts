@@ -1,4 +1,4 @@
-import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const userGenderEnum = pgEnum('user_gender', [
   'male',
@@ -20,6 +20,7 @@ export const users = pgTable(
     gender: userGenderEnum('gender').notNull().default('not-specified'),
     bio: text('bio'),
     role: userRoleEnum('role').notNull().default('user'),
+    testAccount: boolean('test_account').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
   },
