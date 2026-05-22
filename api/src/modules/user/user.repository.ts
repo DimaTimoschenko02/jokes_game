@@ -79,6 +79,7 @@ export class UserRepository {
       gender: row.gender,
       bio: row.bio,
       role: row.role,
+      testAccount: row.testAccount,
       createdAt: row.createdAt
     }
   }

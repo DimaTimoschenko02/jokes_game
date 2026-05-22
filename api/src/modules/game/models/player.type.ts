@@ -8,6 +8,7 @@ export type Player = {
   readonly realName: string
   readonly bio: string
   readonly gender: UserGender
+  readonly isTestAccount: boolean
   connected: boolean
   score: number
 }

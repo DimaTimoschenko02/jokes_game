@@ -108,7 +108,8 @@ export class GameService {
       displayName: input.host.displayName,
       realName: input.host.realName,
       bio: input.host.bio,
-      gender: input.host.gender
+      gender: input.host.gender,
+      isTestAccount: input.host.testAccount
     })
     const isAdmin: boolean = input.host.role === 'admin'
     const testMode: boolean = isAdmin && Boolean(input.testMode)
@@ -171,7 +172,8 @@ export class GameService {
       displayName: input.user.displayName,
       realName: input.user.realName,
       bio: input.user.bio,
-      gender: input.user.gender
+      gender: input.user.gender,
+      isTestAccount: input.user.testAccount
     })
     room.players.set(player.id, player)
     this.socketLinks.set(input.socketId, { roomCode: room.code, playerId: player.id })

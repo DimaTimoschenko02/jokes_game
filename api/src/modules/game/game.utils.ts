@@ -26,6 +26,7 @@ export const createHumanPlayer = (input: {
   readonly realName: string
   readonly bio: string | null
   readonly gender: 'male' | 'female' | 'non-binary' | 'not-specified'
+  readonly isTestAccount: boolean
 }): Player => ({
   id: input.userId,
   socketId: input.socketId,
@@ -34,6 +35,7 @@ export const createHumanPlayer = (input: {
   realName: normalizeName(input.realName),
   bio: input.bio?.slice(0, 200) ?? '',
   gender: input.gender,
+  isTestAccount: input.isTestAccount,
   connected: true,
   score: 0
 })
@@ -50,6 +52,7 @@ export const createBotPlayer = (input: { readonly botNumber: number }): Player =
     realName: label,
     bio: '',
     gender: 'not-specified',
+    isTestAccount: false,
     connected: true,
     score: 0
   }

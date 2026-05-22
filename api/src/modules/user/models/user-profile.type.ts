@@ -10,5 +10,6 @@ export type UserProfile = {
   readonly gender: UserGender
   readonly bio: string | null
   readonly role: UserRole
+  readonly testAccount: boolean
   readonly createdAt: Date
 }
