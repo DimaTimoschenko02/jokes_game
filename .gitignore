@@ -49,7 +49,7 @@ Desktop.ini
 *.pem
 
 # Tool configs (local)
-.claude/
+.claude/settings.local.json
 .claude-flow/
 .mcp.json
 .swarm/
