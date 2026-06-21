@@ -77,8 +77,23 @@ export class ClaudeAgentRunnerService {
     try {
       await mkdir(ISOLATED_CLAUDE_DIR, { recursive: true })
       const realClaudeDir: string = join(REAL_HOME_DIR, '.claude')
+
+      // When a long-lived CLAUDE_CODE_OAUTH_TOKEN is provided via env (prod), it is the
+      // sole, durable auth source. Copying a (possibly stale) .credentials.json into the
+      // isolated HOME shadows the env token (stored OAuth creds win over the env var) and
+      // causes recurring 401s after the canonical creds rotate. In env-token mode we skip
+      // copying it AND remove any lingering one from a previous run (the isolated HOME is
+      // persistent across restarts), so the env token is the only credential the CLI sees.
+      const useEnvToken: boolean = Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN)
+      const authFiles: readonly string[] = useEnvToken
+        ? AUTH_FILES_TO_COPY.filter((name) => name !== '.credentials.json')
+        : AUTH_FILES_TO_COPY
+      if (useEnvToken) {
+        await rm(join(ISOLATED_CLAUDE_DIR, '.credentials.json'), { force: true })
+      }
+
       let copiedCount: number = 0
-      for (const name of AUTH_FILES_TO_COPY) {
+      for (const name of authFiles) {
         const src: string = join(realClaudeDir, name)
         const dst: string = join(ISOLATED_CLAUDE_DIR, name)
         try {
@@ -90,7 +105,7 @@ export class ClaudeAgentRunnerService {
         copiedCount += 1
       }
       this.logger.log(
-        `isolated_home_ready dir=${ISOLATED_HOME_DIR} auth_files=${copiedCount}`
+        `isolated_home_ready dir=${ISOLATED_HOME_DIR} auth_files=${copiedCount} auth_mode=${useEnvToken ? 'env_token' : 'creds_file'}`
       )
       return true
     } catch (error) {
