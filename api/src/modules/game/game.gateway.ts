@@ -1,4 +1,4 @@
-import { Logger, UsePipes, ValidationPipe } from '@nestjs/common'
+import { Logger, UseFilters, UsePipes, ValidationPipe } from '@nestjs/common'
 import {
   ConnectedSocket,
   MessageBody,
@@ -11,6 +11,7 @@ import {
   WsException
 } from '@nestjs/websockets'
 import { Server, Socket } from 'socket.io'
+import { WsLoggingExceptionFilter } from '../../common/filters/ws-logging-exception.filter'
 import { AuthService } from '../auth/auth.service'
 import { UserRepository } from '../user/user.repository'
 import { CastVoteDto } from './dto/cast-vote.dto'
@@ -54,6 +55,7 @@ type SocketQueryPayload = {
     }
   })
 )
+@UseFilters(new WsLoggingExceptionFilter())
 export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   private readonly logger: Logger = new Logger(GameGateway.name)
 
