@@ -250,6 +250,12 @@ export class ClaudeAgentRunnerService {
         const stdoutText: string = Buffer.concat(stdoutChunks).toString('utf-8')
         const stderrText: string = Buffer.concat(stderrChunks).toString('utf-8')
         if (exitCode !== 0) {
+          // Surface the CLI's own diagnostic (auth failures, bad flags, etc.) instead of
+          // swallowing it — a bare "exited with code 1" is undebuggable in prod logs.
+          const snip = (s: string): string => s.slice(0, 400).replace(/\s+/g, ' ').trim()
+          this.logger.warn(
+            `claude_nonzero_exit agent=${config.name} code=${exitCode} stderr="${snip(stderrText)}" stdout="${snip(stdoutText)}"`
+          )
           reject(new AgentInvocationError(`claude exited with code ${exitCode}`, stderrText, exitCode))
           return
         }
