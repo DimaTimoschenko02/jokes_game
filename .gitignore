@@ -54,8 +54,6 @@ Desktop.ini
 .mcp.json
 .swarm/
 ruvector.db
-.cursor/plans/
-.cursor/skills/
 *.stackdump
 
 # Working drafts (final spec lives in docs/superpowers/specs/)

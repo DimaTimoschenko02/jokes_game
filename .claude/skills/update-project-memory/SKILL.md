@@ -19,7 +19,7 @@ description: Обновляет память проекта при значим�
 ## How to Update
 
 1. Обнови `CLAUDE.md` в корне проекта — primary source of truth для Claude Code
-2. Если в проекте есть зеркала памяти (`.cursor/rules/*.mdc`, `~/.claude/projects/<enc>/memory/`) — синкни их
+2. Если в проекте есть зеркало памяти (`~/.claude/projects/<enc>/memory/`) — синкни его
 3. Минимальные точечные правки нужных секций. Не переписывай неизменённые
 
 ## Rules
