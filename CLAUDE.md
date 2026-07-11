@@ -75,35 +75,6 @@ npm run docker:down    # Остановить всё
 - No name placeholders — jokes stored as-is with real player names
 - Fallback: if Claude calls fail → seed prompts from DB (48 seeded)
 
-## Ruflo MCP
-
-Ruflo — persistent vector-indexed memory and task tracking across sessions. Full reference: skill `ruflo-workflow`.
-
-### Session lifecycle
-
-**Start** — load context before any work:
-```
-mcp__ruflo__memory_search(query: "project context recent progress")
-mcp__ruflo__memory_search(query: "<topic of current work>")
-mcp__ruflo__agentdb_session-start(sessionId: "punchme-YYYY-MM-DD")
-```
-
-**End** — save context before session closes:
-```
-mcp__ruflo__memory_store(key: "project-context", value: { status, lastWorkedOn, pending }, upsert: true)
-mcp__ruflo__agentdb_session-end(sessionId: "...", summary: "what was done")
-```
-
-### Rules
-- NEVER start coding without checking Ruflo memory first
-- ALWAYS save session outcomes before ending
-- Run `hooks_pretrain` after adding new modules or major refactors
-- No auto-hooks in settings.json — all calls are manual
-
-## Cursor rules
-
-Проект также использует Cursor IDE. `.cursor/rules/project-memory.mdc` содержит описание проекта (синхронизировать с этим файлом при изменениях). `.cursor/rules/codewriting.mdc` — стиль кода (дублирует глобальные правила).
-
 ## Known Limitations
 
 - Joke memory queue in-memory — теряется при рестарте

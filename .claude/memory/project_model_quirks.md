@@ -50,7 +50,9 @@ NestJS Gateway с `whitelist: true, forbidNonWhitelisted: true` ОТБРАСЫВ
 
 **Срочный фикс на месте:** `cp /home/qwe/.claude/.credentials.json /tmp/punchme-claude-home/.claude/.credentials.json` (или рестарт API — он пересоздаст isolated HOME). 
 
-**Системный фикс — СДЕЛАН 2026-07-11 (коммит `37e6d60` на dev):** auth-файлы перекопируются при КАЖДОМ spawn (serialized promise chain в `claude-agent-runner.service.ts`). Кеширование isolated HOME убрано. Поймали повторно: 2026-07-11 файл `.credentials.json` в isolated HOME вообще исчез после игры 10 июля, а source обновился — старая логика уронила бы все агенты.
+**Системные фиксы — ДВА, дополняют друг друга:**
+- `906bbfd` (main, 2026-06-21): prod авторизуется через **`CLAUDE_CODE_OAUTH_TOKEN` env** (long-lived, из `claude setup-token`); в env-token режиме `.credentials.json` НЕ копируется и удаляется из isolated HOME (stored creds перебивали env-токен → рецидив 401). Детали — [[prod-server-monitoring]].
+- `37e6d60` (dev, 2026-07-11): auth-файлы перекопируются при КАЖДОМ spawn (serialized promise chain). Актуально для локалки (creds-file режим) — копия больше не протухает при ротации.
 
 ## Алиас 'sonnet' на prod CLI ≠ последний Sonnet
 

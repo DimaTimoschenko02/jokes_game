@@ -249,12 +249,12 @@ function App(): ReactElement {
     setRatingsSubmittedLocally(true)
   }, [executeSubmitRatings, ratings, ratingsSubmittedLocally, session])
 
-  useEffect(() => {
-    if (gameState?.phase && gameState.phase !== 'rating' && gameState.phase !== 'lobby' && !ratingsSubmittedLocally) {
-      flushRatings()
-    }
-  }, [gameState?.phase, flushRatings, ratingsSubmittedLocally])
-
+  // NOTE: do NOT flush ratings when leaving the rating phase. submitRatings is only
+  // valid server-side while the rating phase is active — a flush on the
+  // writing/voting/scoreboard transition (notably the writing phase at game start)
+  // threw "Rating phase is not active" and surfaced as an "Internal server error"
+  // banner. Ratings are sent either manually (handleSubmitRatings) or by the in-phase
+  // timer backstop below, both of which fire while phase === 'rating'.
   useEffect(() => {
     if (
       gameState?.phase === 'rating' &&

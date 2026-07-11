@@ -14,9 +14,13 @@
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f --tail=200",
     "ngrok:up": "ngrok http 5173",
-    "ngrok:url": "node scripts/ngrok-url.cjs"
+    "ngrok:url": "node scripts/ngrok-url.cjs",
+    "e2e": "node e2e/play-smoke.mjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.61.0"
+  }
 }

@@ -10,7 +10,13 @@ function loadDotenv(filename) {
     if (!trimmed || trimmed.startsWith('#')) continue
     const eq = trimmed.indexOf('=')
     if (eq < 0) continue
-    out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    // Strip a single pair of surrounding quotes so QUOTED secrets (e.g. a token
+    // wrapped in "...") don't reach the process env with literal quote chars.
+    if (value.length >= 2 && ((value[0] === '"' && value.at(-1) === '"') || (value[0] === "'" && value.at(-1) === "'"))) {
+      value = value.slice(1, -1)
+    }
+    out[trimmed.slice(0, eq).trim()] = value
   }
   return out
 }
