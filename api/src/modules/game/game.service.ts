@@ -270,7 +270,15 @@ export class GameService {
         await room.prefetchOpeningsPromise.catch(() => undefined)
       }
       room.userMemorySnapshots = await this.buildUserMemorySnapshots(room)
-      room.groupMemoryBlock = await this.groupMemoryService.getPromptBlock()
+      // Group memory is a background feature: a failure here must never block game start.
+      try {
+        room.groupMemoryBlock = await this.groupMemoryService.getPromptBlock()
+      } catch (error: unknown) {
+        room.groupMemoryBlock = null
+        this.logger.warn(
+          `group_memory_block_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`
+        )
+      }
       await this.prewarmBotSessions(room)
       await this.generateOpeningsForRound(room, 1)
       await this.startWritingPhase(room.code)
