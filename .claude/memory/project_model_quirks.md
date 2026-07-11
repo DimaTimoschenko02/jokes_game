@@ -50,7 +50,11 @@ NestJS Gateway с `whitelist: true, forbidNonWhitelisted: true` ОТБРАСЫВ
 
 **Срочный фикс на месте:** `cp /home/qwe/.claude/.credentials.json /tmp/punchme-claude-home/.claude/.credentials.json` (или рестарт API — он пересоздаст isolated HOME). 
 
-**Системный фикс (TODO):** при каждом spawn агента — проверять mtime source credentials против isolated копии, если source новее → перекопировать. Либо вообще убрать кеширование isolated HOME и копировать заново каждый раз (стоит миллисекунды).
+**Системный фикс — СДЕЛАН 2026-07-11 (коммит `37e6d60` на dev):** auth-файлы перекопируются при КАЖДОМ spawn (serialized promise chain в `claude-agent-runner.service.ts`). Кеширование isolated HOME убрано. Поймали повторно: 2026-07-11 файл `.credentials.json` в isolated HOME вообще исчез после игры 10 июля, а source обновился — старая логика уронила бы все агенты.
+
+## Алиас 'sonnet' на prod CLI ≠ последний Sonnet
+
+CLI 2.1.185 с `--model sonnet` резолвит в `claude-sonnet-4-6`, хотя Sonnet 5 давно вышел (проверено по session-файлам июльской игры). Хочешь конкретную модель — прописывай полный id (`claude-sonnet-5`). С 2026-07-11 bot-agent так и настроен (+ fallbackModel: 'sonnet').
 
 ## Rating phase auto-submit на фронте
 
