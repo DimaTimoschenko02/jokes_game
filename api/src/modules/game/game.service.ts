@@ -25,7 +25,6 @@ import {
   ROUND_COUNT_MIN,
   ROUND_VOTE_WEIGHTS,
   RATING_PHASE_SECONDS,
-  SCOREBOARD_PHASE_SECONDS,
   VOTING_PHASE_SECONDS,
   VOTING_REVEAL_SECONDS,
   WRITING_PHASE_SECONDS
@@ -288,6 +287,40 @@ export class GameService {
         room.aiStatus = 'idle'
       }
     }
+  }
+
+  public restartGame(input: { readonly roomCode: string; readonly playerId: string }): void {
+    const room = this.getRoomOrFail(input.roomCode)
+    this.ensureHost(room, input.playerId)
+    if (room.phase !== 'finished') {
+      throw new BadRequestException('Game is not finished yet')
+    }
+    this.clearRoomTimer(room)
+    room.phase = 'lobby'
+    room.roundIndex = 0
+    room.prompts = []
+    // allOpenings is offset-indexed per round of the CURRENT game — without a
+    // reset the new game would silently reuse the previous game's openings.
+    room.allOpenings = []
+    room.promptAssignments = new Map()
+    room.submissions = new Map()
+    room.duels = []
+    room.duelIndex = 0
+    room.votingRevealActive = false
+    room.ratingItems = []
+    room.ratingSubmissions = new Map()
+    room.roundVotes = new Map()
+    room.prefetchOpeningsPromise = null
+    room.aiStatus = 'idle'
+    room.isStarting = false
+    room.userMemorySnapshots = []
+    room.groupMemoryBlock = null
+    room.memoryDeltasLog = []
+    // usedPromptTexts is intentionally kept so openings do not repeat across
+    // replays in the same room; players and their scores stay in place (scores
+    // reset in startGame).
+    this.logger.log(`game_restarted room=${room.code} players=${room.players.size}`)
+    this.emitRoomState(room.code)
   }
 
   private async prewarmBotSessions(room: GameRoom): Promise<void> {
@@ -1080,7 +1113,9 @@ export class GameService {
         }
       })
     room.memoryUpdaterInFlight = updaterPromise
-    this.startScoreboardPhase(room)
+    // No scoreboard pause: scores are always visible in the sidebar, the
+    // dedicated phase added nothing but dead waiting between rounds.
+    this.advanceRound(room.code)
   }
 
   private async runMemoryUpdater(room: GameRoom): Promise<void> {
@@ -1214,19 +1249,13 @@ export class GameService {
     room.sessions = this.createEmptySessions()
   }
 
-  private startScoreboardPhase(room: GameRoom): void {
-    room.phase = 'scoreboard'
-    const totals = Array.from(room.players.values()).map((p) => `${p.name}=${p.score}`).join(' ')
-    this.logger.log(`scoreboard_phase_start room=${room.code} round=${room.roundIndex} totals=[${totals}]`)
-    this.emitRoomState(room.code)
-    this.setRoomTimer(room, SCOREBOARD_PHASE_SECONDS, () => this.advanceRound(room.code))
-  }
-
   private advanceRound(roomCode: string): void {
     const room = this.rooms.get(roomCode)
-    if (!room || room.phase !== 'scoreboard') {
+    if (!room || room.phase !== 'rating') {
       return
     }
+    const totals = Array.from(room.players.values()).map((p) => `${p.name}=${p.score}`).join(' ')
+    this.logger.log(`round_complete room=${room.code} round=${room.roundIndex} totals=[${totals}]`)
     if (room.roundIndex >= room.roundCount) {
       room.phase = 'finished'
       this.clearRoomTimer(room)

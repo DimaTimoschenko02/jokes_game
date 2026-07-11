@@ -25,10 +25,10 @@ const applyTheme = (theme: AppTheme): void => {
 
 const PHASE_TIMER_SECONDS: Record<GamePhase, number | null> = {
   lobby: null,
-  writing: 120,
+  writing: 180,
   voting: 25,
   rating: 30,
-  scoreboard: 8,
+  scoreboard: null,
   finished: null
 }
 
@@ -86,6 +86,7 @@ function App(): ReactElement {
     executeCreateRoom,
     executeJoinRoom,
     executeStartGame,
+    executeRestartGame,
     executeSubmitAnswers,
     executeCastVote,
     executeSubmitRatings,
@@ -102,6 +103,7 @@ function App(): ReactElement {
   const [ratingsSubmittedLocally, setRatingsSubmittedLocally] = useState<boolean>(false)
   const [ratingFlashItemId, setRatingFlashItemId] = useState<string | null>(null)
   const [answersBtnPulse, setAnswersBtnPulse] = useState<boolean>(false)
+  const [answersDirty, setAnswersDirty] = useState<boolean>(false)
   const [ratingsBtnPulse, setRatingsBtnPulse] = useState<boolean>(false)
   const [linkCopied, setLinkCopied] = useState<boolean>(false)
   const [isStartingGame, setIsStartingGame] = useState<boolean>(false)
@@ -134,7 +136,10 @@ function App(): ReactElement {
       (gameState.ratingSubmitters ?? []).includes(session.playerId)
   )
   const canSubmit = Boolean(
-    gameState?.phase === 'writing' && answers[0].trim() && answers[1].trim() && !hasSubmittedAnswers
+    gameState?.phase === 'writing' &&
+      answers[0].trim() &&
+      answers[1].trim() &&
+      (!hasSubmittedAnswers || answersDirty)
   )
   const myVoteSide =
     session && gameState?.phase === 'voting' && gameState.currentDuel
@@ -226,6 +231,7 @@ function App(): ReactElement {
   useEffect(() => {
     if (gameState?.phase === 'writing') {
       setAnswers(['', ''])
+      setAnswersDirty(false)
       setOpeningFeedback({})
       setOpeningFeedbackSent(false)
     }
@@ -297,13 +303,14 @@ function App(): ReactElement {
   }
 
   const handleSubmit = (): void => {
-    if (!session || hasSubmittedAnswers) {
+    if (!session || !canSubmit) {
       return
     }
     setAnswersBtnPulse(true)
     window.setTimeout(() => {
       setAnswersBtnPulse(false)
     }, 420)
+    setAnswersDirty(false)
     executeSubmitAnswers({
       roomCode: session.roomCode,
       answers
@@ -607,7 +614,11 @@ function App(): ReactElement {
         {gameState.phase === 'writing' && (
           <div className={`phaseBlock ${hasSubmittedAnswers ? 'phaseSuccess' : ''}`}>
             <h2>Закончи оба предложения</h2>
-            {hasSubmittedAnswers && <p className="confirmBanner">Ответы отправлены — ждём остальных</p>}
+            {hasSubmittedAnswers && (
+              <p className="confirmBanner">
+                Ответы отправлены — можно исправить, пока идёт фаза
+              </p>
+            )}
             {[0, 1].map((slot) => {
               const promptText = myPromptLabels[slot]
               const assignedIndex = myAssignment?.promptIndices[slot]
@@ -639,12 +650,12 @@ function App(): ReactElement {
                   </div>
                   <textarea
                     value={answers[slot]}
-                    disabled={hasSubmittedAnswers}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      setAnswersDirty(true)
                       setAnswers(
                         slot === 0 ? [event.target.value, answers[1]] : [answers[0], event.target.value]
                       )
-                    }
+                    }}
                     placeholder="Напиши продолжение..."
                   />
                 </div>
@@ -656,7 +667,11 @@ function App(): ReactElement {
               disabled={!canSubmit}
               onClick={handleSubmit}
             >
-              {hasSubmittedAnswers ? 'Отправлено' : 'Отправить ответы'}
+              {hasSubmittedAnswers
+                ? answersDirty
+                  ? 'Обновить ответы'
+                  : 'Отправлено'
+                : 'Отправить ответы'}
             </button>
           </div>
         )}
@@ -744,13 +759,6 @@ function App(): ReactElement {
           </div>
         )}
 
-        {gameState.phase === 'scoreboard' && (
-          <div className="phaseBlock">
-            <h2>Раунд завершён</h2>
-            <p>Очки обновлены. Следующий раунд начнётся автоматически.</p>
-          </div>
-        )}
-
         {gameState.phase === 'rating' && (
           <div className={`phaseBlock ${hasSubmittedRatings ? 'phaseSuccess' : ''}`}>
             <h2>Оцени шутки</h2>
@@ -790,6 +798,17 @@ function App(): ReactElement {
           <div className="phaseBlock">
             <h2>Игра окончена!</h2>
             <p>Победитель: {gameState.players[0]?.name ?? 'Нет победителя'}</p>
+            {me?.isHost ? (
+              <button
+                type="button"
+                className="primary"
+                onClick={() => session && executeRestartGame({ roomCode: session.roomCode })}
+              >
+                Сыграть ещё раз
+              </button>
+            ) : (
+              <p className="subtitle">Хост может запустить новую игру с тем же составом.</p>
+            )}
           </div>
         )}
           </div>

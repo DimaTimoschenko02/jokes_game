@@ -103,6 +103,10 @@ export class GameSocket {
     this.socket.emit('startGame', payload)
   }
 
+  public executeRestartGame(payload: StartGamePayload): void {
+    this.socket.emit('restartGame', payload)
+  }
+
   public executeSubmitAnswers(payload: SubmitAnswersPayload): void {
     this.socket.emit('submitAnswers', payload)
   }

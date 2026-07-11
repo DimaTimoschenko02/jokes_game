@@ -197,6 +197,17 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     })
   }
 
+  @SubscribeMessage('restartGame')
+  public restartGame(
+    @ConnectedSocket() client: SocketWithUser,
+    @MessageBody() body: StartGameDto
+  ): void {
+    this.gameService.restartGame({
+      roomCode: body.roomCode,
+      playerId: client.data.userId
+    })
+  }
+
   @SubscribeMessage('submitAnswers')
   public submitAnswers(
     @ConnectedSocket() client: SocketWithUser,
