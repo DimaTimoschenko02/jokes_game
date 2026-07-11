@@ -57,20 +57,19 @@ export type AgentStartResult<T> = {
 @Injectable()
 export class ClaudeAgentRunnerService {
   private readonly logger: Logger = new Logger(ClaudeAgentRunnerService.name)
+  private isolatedHomeChain: Promise<boolean> = Promise.resolve(true)
   private isolatedHomeReady: boolean = false
-  private isolatedHomeReadyPromise: Promise<boolean> | null = null
 
+  // Auth files are re-copied on EVERY spawn: credentials rotate (OAuth refresh,
+  // re-login) and the isolated copy goes stale, killing agents with 401 mid-game.
+  // Copies are serialized through a promise chain to avoid concurrent writes.
   private async ensureIsolatedHome(): Promise<boolean> {
-    if (this.isolatedHomeReady) {
-      return true
-    }
-    if (this.isolatedHomeReadyPromise) {
-      return this.isolatedHomeReadyPromise
-    }
-    this.isolatedHomeReadyPromise = this.buildIsolatedHome()
-    const result = await this.isolatedHomeReadyPromise
-    this.isolatedHomeReady = result
-    return result
+    this.isolatedHomeChain = this.isolatedHomeChain.then(
+      () => this.buildIsolatedHome(),
+      () => this.buildIsolatedHome()
+    )
+    this.isolatedHomeReady = await this.isolatedHomeChain
+    return this.isolatedHomeReady
   }
 
   private async buildIsolatedHome(): Promise<boolean> {

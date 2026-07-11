@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { ClaudeAgentRunnerService } from '../../claude-agent/claude-agent-runner.service'
 import { AgentSession } from '../../claude-agent/models/agent-session.type'
-import { BOT_AGENT_CONFIG } from '../configs/bot-agent.config'
+import { BOT_AGENT_CONFIG, BotPersona } from '../configs/bot-agent.config'
+import { AgentConfig } from '../../claude-agent/models/agent-config.type'
 
 export type BotPlayerProfile = {
   readonly userId: string
@@ -40,11 +41,20 @@ export class BotAgentService {
     roomCode: string,
     botId: string,
     players: readonly BotPlayerProfile[],
-    groupMemory?: string
+    groupMemory?: string,
+    persona?: BotPersona
   ): Promise<BotStartResult> {
     const initialPrompt: string = this.buildInitialPrompt(players, groupMemory)
-    const { session } = await this.runner.start<never>(BOT_AGENT_CONFIG, initialPrompt)
-    this.logger.log(`bot_start room=${roomCode} bot=${botId} session=${session.id}`)
+    const config: AgentConfig<never> = persona
+      ? {
+          ...BOT_AGENT_CONFIG,
+          systemPrompt: `${BOT_AGENT_CONFIG.systemPrompt}\n\n${persona.block}`
+        }
+      : BOT_AGENT_CONFIG
+    const { session } = await this.runner.start<never>(config, initialPrompt)
+    this.logger.log(
+      `bot_start room=${roomCode} bot=${botId} persona=${persona?.key ?? 'none'} session=${session.id}`
+    )
     return { session }
   }
 

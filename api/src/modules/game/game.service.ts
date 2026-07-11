@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common'
 import { BotAgentService, BotFewShotExample, BotPlayerProfile } from '../agents/bot/bot-agent.service'
+import { BOT_PERSONAS } from '../agents/configs/bot-agent.config'
 import { MemoryUpdaterAgentService } from '../agents/memory-updater/memory-updater-agent.service'
 import { MemoryUpdaterOutput } from '../agents/memory-updater/models/user-memory-delta.type'
 import { UserMemorySnapshot } from '../agents/memory-updater/models/user-memory-snapshot.type'
@@ -287,14 +288,16 @@ export class GameService {
       return
     }
     const profiles = this.buildBotPlayerProfiles(room)
+    const personaOffset: number = Math.floor(Math.random() * BOT_PERSONAS.length)
     await Promise.all(
-      botPlayers.map(async (bot) => {
+      botPlayers.map(async (bot, index) => {
         try {
           const result = await this.botAgent.startForBot(
             room.code,
             bot.id,
             profiles,
-            room.groupMemoryBlock ?? undefined
+            room.groupMemoryBlock ?? undefined,
+            BOT_PERSONAS[(personaOffset + index) % BOT_PERSONAS.length]
           )
           room.sessions.botSessions.set(bot.id, {
             session: result.session
