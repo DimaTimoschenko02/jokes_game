@@ -117,11 +117,11 @@ function App(): ReactElement {
   const [openingFeedback, setOpeningFeedback] = useState<Record<number, FeedbackLevel>>({})
   const [openingFeedbackSent, setOpeningFeedbackSent] = useState<boolean>(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  // Phase the current localTimer belongs to. Guards the rating auto-flush from a
-  // stale localTimer===0 left over from the voting-reveal countdown: without it
-  // the flush fired on the very first rating render and instantly closed the
-  // phase with empty ratings for everyone (round 1 rating was never visible).
-  const timerPhaseRef = useRef<GamePhase | null>(null)
+  // Guards the rating auto-flush from the stale localTimer===0 left over from
+  // the voting-reveal countdown: on the first rating render the flush fired
+  // immediately and closed the phase with empty ratings for everyone. The
+  // backstop only arms after the rating phase's own timer has been seen >2s.
+  const ratingFlushArmedRef = useRef<boolean>(false)
 
   const me = useMemo(() => gameState?.players.find((player) => player.id === session?.playerId) ?? null, [gameState, session])
   const myAssignment = useMemo(
@@ -205,11 +205,9 @@ function App(): ReactElement {
     }
     const serverSeconds = gameState?.timerSecondsLeft ?? null
     if (serverSeconds == null || serverSeconds <= 0) {
-      timerPhaseRef.current = null
       setLocalTimer(null)
       return
     }
-    timerPhaseRef.current = gameState?.phase ?? null
     setLocalTimer(serverSeconds)
     timerRef.current = setInterval(() => {
       setLocalTimer((prev) => {
@@ -293,9 +291,19 @@ function App(): ReactElement {
   // banner. Ratings are sent either manually (handleSubmitRatings) or by the in-phase
   // timer backstop below, both of which fire while phase === 'rating'.
   useEffect(() => {
+    if (gameState?.phase !== 'rating') {
+      ratingFlushArmedRef.current = false
+      return
+    }
+    if (localTimer != null && localTimer > 2) {
+      ratingFlushArmedRef.current = true
+    }
+  }, [gameState?.phase, localTimer])
+
+  useEffect(() => {
     if (
       gameState?.phase === 'rating' &&
-      timerPhaseRef.current === 'rating' &&
+      ratingFlushArmedRef.current &&
       !ratingsSubmittedLocally &&
       localTimer != null &&
       localTimer <= 2
