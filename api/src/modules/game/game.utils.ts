@@ -1,5 +1,5 @@
 import { customAlphabet } from 'nanoid'
-import { ANSWER_MAX_LENGTH, PLAYER_NAME_MAX_LENGTH } from './constants/game.constants'
+import { ANSWER_MAX_LENGTH, OPENING_MAX_LENGTH, PLAYER_NAME_MAX_LENGTH } from './constants/game.constants'
 import { Duel } from './models/duel.type'
 import { GameRoom } from './models/game-room.type'
 import { Player } from './models/player.type'
@@ -18,6 +18,9 @@ export const normalizeName = (name: string): string =>
 
 export const normalizeAnswer = (value: string): string =>
   value.replace(/\s+/g, ' ').trim().slice(0, ANSWER_MAX_LENGTH)
+
+export const normalizeOpening = (value: string): string =>
+  value.replace(/\s+/g, ' ').trim().slice(0, OPENING_MAX_LENGTH)
 
 export const createHumanPlayer = (input: {
   readonly userId: string
@@ -80,9 +83,39 @@ export const createSubmission = (playerId: string, assignedPromptIndices: readon
   submittedAt: null
 })
 
-export const buildCircularPromptAssignments = (playerIds: readonly string[]): Map<string, readonly [number, number]> => {
+const ASSIGNMENT_SHUFFLE_ATTEMPTS: number = 200
+
+// player[i] receives openings i and (i+1)%n, so an order is author-safe when no
+// player lands on a position adjacent to their own opening.
+const isAuthorSafeOrder = (
+  shuffled: readonly string[],
+  openingAuthors: ReadonlyMap<number, string>
+): boolean => {
+  const n = shuffled.length
+  for (let i = 0; i < n; i += 1) {
+    if (openingAuthors.get(i) === shuffled[i] || openingAuthors.get((i + 1) % n) === shuffled[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+export const buildCircularPromptAssignments = (
+  playerIds: readonly string[],
+  openingAuthors?: ReadonlyMap<number, string>
+): Map<string, readonly [number, number]> => {
   const n = playerIds.length
-  const shuffled = [...playerIds].sort(() => Math.random() - 0.5)
+  const needsConstraint = Boolean(openingAuthors && openingAuthors.size > 0)
+  let shuffled = [...playerIds].sort(() => Math.random() - 0.5)
+  if (needsConstraint && openingAuthors) {
+    // n=2 is unsolvable (both players see both openings) — keep the last shuffle.
+    for (let attempt = 0; attempt < ASSIGNMENT_SHUFFLE_ATTEMPTS; attempt += 1) {
+      if (isAuthorSafeOrder(shuffled, openingAuthors)) {
+        break
+      }
+      shuffled = [...playerIds].sort(() => Math.random() - 0.5)
+    }
+  }
   const map = new Map<string, readonly [number, number]>()
   for (let i = 0; i < n; i += 1) {
     const playerId = shuffled[i]

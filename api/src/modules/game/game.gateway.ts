@@ -20,6 +20,7 @@ import { JoinRoomDto } from './dto/join-room.dto'
 import { LeaveRoomDto } from './dto/leave-room.dto'
 import { StartGameDto } from './dto/start-game.dto'
 import { SubmitAnswersDto } from './dto/submit-answers.dto'
+import { SubmitOpeningDto } from './dto/submit-opening.dto'
 import { SubmitOpeningFeedbackDto } from './dto/submit-feedback.dto'
 import { SubmitRatingsDto } from './dto/submit-ratings.dto'
 import { GameService } from './game.service'
@@ -146,7 +147,8 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       host: userProfile,
       roundCount: body.roundCount,
       botCount: body.botCount,
-      testMode: body.testMode
+      testMode: body.testMode,
+      openingsMode: body.openingsMode
     })
     client.join(session.roomCode)
     client.emit('session', session)
@@ -205,6 +207,18 @@ export class GameGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     this.gameService.restartGame({
       roomCode: body.roomCode,
       playerId: client.data.userId
+    })
+  }
+
+  @SubscribeMessage('submitOpening')
+  public submitOpening(
+    @ConnectedSocket() client: SocketWithUser,
+    @MessageBody() body: SubmitOpeningDto
+  ): void {
+    this.gameService.submitOpening({
+      roomCode: body.roomCode,
+      playerId: client.data.userId,
+      text: body.text
     })
   }
 

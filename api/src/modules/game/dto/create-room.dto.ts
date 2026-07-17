@@ -1,4 +1,4 @@
-import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator'
+import { IsBoolean, IsIn, IsInt, IsOptional, Max, Min } from 'class-validator'
 import {
   BOT_COUNT_MAX,
   BOT_COUNT_MIN,
@@ -20,4 +20,8 @@ export class CreateRoomDto {
   @IsOptional()
   @IsBoolean()
   public testMode?: boolean
+
+  @IsOptional()
+  @IsIn(['ai', 'human'])
+  public openingsMode?: 'ai' | 'human'
 }

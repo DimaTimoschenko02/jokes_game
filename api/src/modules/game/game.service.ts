@@ -24,6 +24,7 @@ import {
   ROUND_COUNT_MAX,
   ROUND_COUNT_MIN,
   ROUND_VOTE_WEIGHTS,
+  OPENING_WRITING_PHASE_SECONDS,
   RATING_PHASE_SECONDS,
   VOTING_PHASE_SECONDS,
   VOTING_REVEAL_SECONDS,
@@ -48,7 +49,8 @@ import {
   createRoomCode,
   createSubmission,
   getAnswerForPromptIndex,
-  normalizeAnswer
+  normalizeAnswer,
+  normalizeOpening
 } from './game.utils'
 
 type BroadcastFn = (roomCode: string) => void
@@ -104,6 +106,7 @@ export class GameService {
     readonly roundCount: number
     readonly botCount: number
     readonly testMode?: boolean
+    readonly openingsMode?: 'ai' | 'human'
   }): Promise<PlayerSession> {
     const host = createHumanPlayer({
       userId: input.host.id,
@@ -124,10 +127,15 @@ export class GameService {
       roundCount: this.normalizeRoundCount(input.roundCount),
       botCount: this.normalizeBotCount(input.botCount),
       collectData: !testMode,
+      openingsMode: input.openingsMode === 'human' ? 'human' : 'ai',
       phase: 'lobby',
       roundIndex: 0,
       prompts: [],
       allOpenings: [],
+      humanOpenings: new Map(),
+      openingAuthors: new Map(),
+      openingReservePromise: null,
+      isFinishingOpenings: false,
       usedPromptTexts: [],
       promptAssignments: new Map(),
       submissions: new Map(),
@@ -279,8 +287,12 @@ export class GameService {
         )
       }
       await this.prewarmBotSessions(room)
-      await this.generateOpeningsForRound(room, 1)
-      await this.startWritingPhase(room.code)
+      if (room.openingsMode === 'human') {
+        this.startOpeningWritingPhase(room)
+      } else {
+        await this.generateOpeningsForRound(room, 1)
+        await this.startWritingPhase(room.code)
+      }
     } finally {
       room.isStarting = false
       if (room.aiStatus === 'generating') {
@@ -302,6 +314,10 @@ export class GameService {
     // allOpenings is offset-indexed per round of the CURRENT game — without a
     // reset the new game would silently reuse the previous game's openings.
     room.allOpenings = []
+    room.humanOpenings = new Map()
+    room.openingAuthors = new Map()
+    room.openingReservePromise = null
+    room.isFinishingOpenings = false
     room.promptAssignments = new Map()
     room.submissions = new Map()
     room.duels = []
@@ -397,18 +413,28 @@ export class GameService {
     if (room.allOpenings.length >= offset + needed) {
       return
     }
+    const pool = await this.generateOpeningsPool(room, needed, [], roundNumber)
+    room.allOpenings.push(...pool)
+  }
 
+  // Produces `needed` (best effort) openings WITHOUT mutating room.allOpenings —
+  // shared between the ai-mode round generation and the human-mode AI top-up.
+  private async generateOpeningsPool(
+    room: GameRoom,
+    needed: number,
+    extraExcluded: readonly string[],
+    roundNumber: number
+  ): Promise<readonly string[]> {
     const canUseAgent: boolean = room.isStarting || room.phase !== 'lobby'
     if (canUseAgent) {
       const agentStart = Date.now()
       try {
-        const viaAgent = await this.generateOpeningsViaAgent(room, needed)
+        const viaAgent = await this.generateOpeningsViaAgent(room, needed, extraExcluded)
         if (viaAgent.length >= needed) {
-          room.allOpenings.push(...viaAgent.slice(0, needed))
           this.logger.log(
             `generate_round_openings_via_agent room=${room.code} round=${roundNumber} count=${viaAgent.length} elapsed_ms=${Date.now() - agentStart}`
           )
-          return
+          return viaAgent.slice(0, needed)
         }
         this.logger.warn(
           `generate_round_openings_agent_short room=${room.code} round=${roundNumber} got=${viaAgent.length} needed=${needed} falling_back_legacy`
@@ -432,29 +458,29 @@ export class GameService {
       playerNames,
       playerContext,
       goldenExamples,
-      excludedOpenings: room.allOpenings
+      excludedOpenings: [...room.allOpenings, ...extraExcluded]
     })
 
     const elapsedMs = Date.now() - startMs
 
     if (openings.length >= needed) {
-      room.allOpenings.push(...openings)
       this.logger.log(`generate_round_openings_ok room=${room.code} round=${roundNumber} count=${openings.length} elapsed_ms=${elapsedMs} source=ai`)
-      return
+      return openings
     }
 
     this.logger.warn(`generate_round_openings_insufficient room=${room.code} round=${roundNumber} got=${openings.length} needed=${needed} elapsed_ms=${elapsedMs} falling_back_to_db`)
     const fallbackPrompts = await this.promptStarterService.selectPrompts({
       count: needed - openings.length,
-      excludedTexts: [...room.allOpenings, ...openings]
+      excludedTexts: [...room.allOpenings, ...extraExcluded, ...openings]
     })
-    room.allOpenings.push(...openings, ...fallbackPrompts)
     this.logger.log(`generate_round_openings_with_fallback room=${room.code} round=${roundNumber} ai=${openings.length} db=${fallbackPrompts.length} elapsed_ms=${elapsedMs}`)
+    return [...openings, ...fallbackPrompts]
   }
 
   private async generateOpeningsViaAgent(
     room: GameRoom,
-    needed: number
+    needed: number,
+    extraExcluded: readonly string[] = []
   ): Promise<readonly string[]> {
     let raw: readonly string[]
     if (!room.sessions.openingGenerator) {
@@ -478,7 +504,7 @@ export class GameService {
       raw = await this.openingGeneratorAgent.generateMore(room.sessions.openingGenerator, {
         needed,
         previousRoundResults: [],
-        excludedOpenings: room.allOpenings
+        excludedOpenings: [...room.allOpenings, ...extraExcluded]
       })
     }
 
@@ -496,6 +522,7 @@ export class GameService {
           previousRoundResults: [],
           excludedOpenings: [
             ...room.allOpenings,
+            ...extraExcluded,
             ...accepted.map((a) => a.text),
             ...filter.rejectedAsDuplicates
           ]
@@ -517,6 +544,11 @@ export class GameService {
   }
 
   private prefetchNextRoundOpenings(room: GameRoom): void {
+    if (room.openingsMode === 'human') {
+      // Human mode: the round pool depends on what players write, so the AI
+      // share is prefetched per round in startOpeningWritingPhase instead.
+      return
+    }
     const nextRound = room.roundIndex + 1
     if (nextRound > room.roundCount) {
       return
@@ -556,6 +588,130 @@ export class GameService {
     return Array.from(room.players.values())
       .filter((player) => !player.isBot)
       .map((player) => player.name)
+  }
+
+  private async startRound(roomCode: string): Promise<void> {
+    const room = this.rooms.get(roomCode)
+    if (!room) {
+      return
+    }
+    if (room.openingsMode === 'human') {
+      this.startOpeningWritingPhase(room)
+      return
+    }
+    await this.startWritingPhase(roomCode)
+  }
+
+  // roundIndex is NOT incremented here — it advances in startWritingPhase, so
+  // during opening-writing the upcoming round is roundIndex + 1.
+  private startOpeningWritingPhase(room: GameRoom): void {
+    room.phase = 'opening-writing'
+    room.humanOpenings = new Map()
+    room.openingAuthors = new Map()
+    room.isFinishingOpenings = false
+    const humanCount: number = Array.from(room.players.values()).filter((player) => !player.isBot).length
+    const reserveCount: number = room.players.size - humanCount
+    this.logger.log(
+      `opening_writing_start room=${room.code} round=${room.roundIndex + 1} humans=${humanCount} ai_reserve=${reserveCount}`
+    )
+    room.openingReservePromise =
+      reserveCount > 0
+        ? this.generateOpeningsPool(room, reserveCount, [], room.roundIndex + 1).catch((error: unknown) => {
+            this.logger.warn(
+              `opening_reserve_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`
+            )
+            return [] as readonly string[]
+          })
+        : null
+    this.emitRoomState(room.code)
+    this.setRoomTimer(room, OPENING_WRITING_PHASE_SECONDS, () => {
+      void this.finishOpeningWriting(room.code)
+    })
+  }
+
+  public submitOpening(input: {
+    readonly roomCode: string
+    readonly playerId: string
+    readonly text: string
+  }): void {
+    const room = this.getRoomOrFail(input.roomCode)
+    if (room.phase !== 'opening-writing') {
+      throw new BadRequestException('Opening writing phase is not active')
+    }
+    const player = this.getPlayerOrFail(room, input.playerId)
+    if (player.isBot || room.isFinishingOpenings) {
+      return
+    }
+    const text: string = normalizeOpening(input.text)
+    if (!text) {
+      return
+    }
+    room.humanOpenings.set(player.id, text)
+    this.emitRoomState(room.code)
+    if (this.hasAllOpenings(room)) {
+      void this.finishOpeningWriting(room.code)
+    }
+  }
+
+  private hasAllOpenings(room: GameRoom): boolean {
+    const humans = Array.from(room.players.values()).filter((player) => !player.isBot)
+    return humans.every((player) => room.humanOpenings.has(player.id))
+  }
+
+  private async finishOpeningWriting(roomCode: string): Promise<void> {
+    const room = this.rooms.get(roomCode)
+    if (!room || room.phase !== 'opening-writing' || room.isFinishingOpenings) {
+      return
+    }
+    room.isFinishingOpenings = true
+    this.clearRoomTimer(room)
+    const playerCount: number = room.players.size
+    const humanEntries: readonly [string, string][] = Array.from(room.humanOpenings.entries())
+    const humanTexts: readonly string[] = humanEntries.map(([, text]) => text)
+    const needed: number = playerCount - humanEntries.length
+    const aiOpenings: string[] = []
+    if (needed > 0) {
+      const reserve = room.openingReservePromise ? await room.openingReservePromise : []
+      aiOpenings.push(...reserve.slice(0, needed))
+      if (aiOpenings.length < needed) {
+        const extra = await this.generateOpeningsPool(
+          room,
+          needed - aiOpenings.length,
+          [...humanTexts, ...aiOpenings],
+          room.roundIndex + 1
+        ).catch((error: unknown) => {
+          this.logger.warn(
+            `opening_topup_failed room=${room.code} error=${error instanceof Error ? error.message : String(error)}`
+          )
+          return [] as readonly string[]
+        })
+        aiOpenings.push(...extra.slice(0, needed - aiOpenings.length))
+      }
+    }
+    room.openingReservePromise = null
+
+    const pool: { readonly text: string; readonly authorId: string | null }[] = [
+      ...humanEntries.map(([playerId, text]) => ({ text, authorId: playerId })),
+      ...aiOpenings.map((text) => ({ text, authorId: null }))
+    ].sort(() => Math.random() - 0.5)
+
+    room.openingAuthors = new Map()
+    pool.forEach((entry, index) => {
+      if (entry.authorId) {
+        room.openingAuthors.set(index, entry.authorId)
+      }
+    })
+    room.allOpenings.push(...pool.map((entry) => entry.text))
+
+    if (room.collectData) {
+      humanEntries.forEach(([playerId, text]) => {
+        this.promptStarterService.saveHumanOpening({ text, authorUserId: playerId })
+      })
+    }
+    this.logger.log(
+      `opening_writing_done room=${room.code} round=${room.roundIndex + 1} human=${humanEntries.length} ai=${aiOpenings.length} pool=${pool.length}`
+    )
+    await this.startWritingPhase(room.code)
   }
 
   public submitAnswers(input: { readonly roomCode: string; readonly playerId: string; readonly answers: [string, string] }): void {
@@ -779,7 +935,7 @@ export class GameService {
     }
     room.prompts = roundOpenings
     room.usedPromptTexts.push(...roundOpenings)
-    room.promptAssignments = buildCircularPromptAssignments(playerIds)
+    room.promptAssignments = buildCircularPromptAssignments(playerIds, room.openingAuthors)
     this.logger.log(`writing_phase_start room=${room.code} round=${room.roundIndex}/${room.roundCount} players=${playerCount} bots=${Array.from(room.players.values()).filter((p) => p.isBot).length}`)
     room.players.forEach((player) => {
       const assignment = room.promptAssignments.get(player.id)
@@ -1266,7 +1422,7 @@ export class GameService {
       void this.finalizeGroupMemoryAndCleanup(room)
       return
     }
-    void this.startWritingPhase(room.code)
+    void this.startRound(room.code)
   }
 
   private async finalizeGroupMemoryAndCleanup(room: GameRoom): Promise<void> {
@@ -1332,6 +1488,9 @@ export class GameService {
       duelIndex: room.phase === 'voting' ? room.duelIndex : 0,
       duelCount: room.phase === 'voting' ? room.duels.length : 0,
       votingRevealActive: room.phase === 'voting' ? room.votingRevealActive : false,
+      openingsMode: room.openingsMode,
+      openingSubmitters: room.phase === 'opening-writing' ? Array.from(room.humanOpenings.keys()) : [],
+      myOpening: room.phase === 'opening-writing' ? room.humanOpenings.get(viewerPlayerId) ?? null : null,
       writingSubmitters: this.getWritingSubmitters(room),
       ratingSubmitters: this.getRatingSubmitters(room),
       ratingItems: room.ratingItems,
@@ -1385,6 +1544,13 @@ export class GameService {
     const fullVotes = Object.fromEntries(duel.votes) as Record<string, 'left' | 'right'>
     const votesByPlayerId = this.filterVotesForViewer(duel, viewerPlayerId, fullVotes)
     const goldenVoterIds = Object.keys(votesByPlayerId).filter((voterId) => duel.goldenVoters.has(voterId))
+    // Opening author is revealed on the same terms as punchline authors:
+    // to duel participants, to viewers who already voted, and during reveal.
+    const openingAuthorRevealed: boolean =
+      viewerPlayerId === duel.leftPlayerId ||
+      viewerPlayerId === duel.rightPlayerId ||
+      duel.votes.has(viewerPlayerId) ||
+      room.votingRevealActive
     return {
       id: duel.id,
       prompt: room.prompts[duel.promptIndex],
@@ -1393,7 +1559,10 @@ export class GameService {
       leftAnswer,
       rightAnswer,
       votesByPlayerId,
-      goldenVoterIds
+      goldenVoterIds,
+      openingAuthorPlayerId: openingAuthorRevealed
+        ? room.openingAuthors.get(duel.promptIndex) ?? null
+        : null
     }
   }
 
