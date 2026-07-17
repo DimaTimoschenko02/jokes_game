@@ -117,6 +117,11 @@ function App(): ReactElement {
   const [openingFeedback, setOpeningFeedback] = useState<Record<number, FeedbackLevel>>({})
   const [openingFeedbackSent, setOpeningFeedbackSent] = useState<boolean>(false)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Phase the current localTimer belongs to. Guards the rating auto-flush from a
+  // stale localTimer===0 left over from the voting-reveal countdown: without it
+  // the flush fired on the very first rating render and instantly closed the
+  // phase with empty ratings for everyone (round 1 rating was never visible).
+  const timerPhaseRef = useRef<GamePhase | null>(null)
 
   const me = useMemo(() => gameState?.players.find((player) => player.id === session?.playerId) ?? null, [gameState, session])
   const myAssignment = useMemo(
@@ -200,9 +205,11 @@ function App(): ReactElement {
     }
     const serverSeconds = gameState?.timerSecondsLeft ?? null
     if (serverSeconds == null || serverSeconds <= 0) {
+      timerPhaseRef.current = null
       setLocalTimer(null)
       return
     }
+    timerPhaseRef.current = gameState?.phase ?? null
     setLocalTimer(serverSeconds)
     timerRef.current = setInterval(() => {
       setLocalTimer((prev) => {
@@ -288,6 +295,7 @@ function App(): ReactElement {
   useEffect(() => {
     if (
       gameState?.phase === 'rating' &&
+      timerPhaseRef.current === 'rating' &&
       !ratingsSubmittedLocally &&
       localTimer != null &&
       localTimer <= 2
