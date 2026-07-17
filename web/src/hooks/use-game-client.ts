@@ -9,6 +9,7 @@ import {
   type RoomLostReason,
   type StartGamePayload,
   type SubmitAnswersPayload,
+  type SubmitOpeningPayload,
   type SubmitOpeningFeedbackPayload,
   type SubmitRatingsPayload
 } from '../socket/game-socket'
@@ -43,6 +44,7 @@ export const useGameClient = (input: {
   readonly executeJoinRoom: (payload: JoinRoomPayload) => void
   readonly executeStartGame: (payload: StartGamePayload) => void
   readonly executeRestartGame: (payload: StartGamePayload) => void
+  readonly executeSubmitOpening: (payload: SubmitOpeningPayload) => void
   readonly executeSubmitAnswers: (payload: SubmitAnswersPayload) => void
   readonly executeCastVote: (payload: CastVotePayload) => void
   readonly executeSubmitRatings: (payload: SubmitRatingsPayload) => void
@@ -111,6 +113,7 @@ export const useGameClient = (input: {
       executeJoinRoom: (payload: JoinRoomPayload) => socketRef.current?.executeJoinRoom(payload),
       executeStartGame: (payload: StartGamePayload) => socketRef.current?.executeStartGame(payload),
       executeRestartGame: (payload: StartGamePayload) => socketRef.current?.executeRestartGame(payload),
+      executeSubmitOpening: (payload: SubmitOpeningPayload) => socketRef.current?.executeSubmitOpening(payload),
       executeSubmitAnswers: (payload: SubmitAnswersPayload) => socketRef.current?.executeSubmitAnswers(payload),
       executeCastVote: (payload: CastVotePayload) => socketRef.current?.executeCastVote(payload),
       executeSubmitRatings: (payload: SubmitRatingsPayload) => socketRef.current?.executeSubmitRatings(payload),

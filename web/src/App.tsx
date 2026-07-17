@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactElement } from 'react'
 import { useAuth } from './auth/auth-context'
 import type { ClientPlayer } from './models/client-player.type'
-import type { GamePhase } from './models/game-phase.type'
+import type { GamePhase, OpeningsMode } from './models/game-phase.type'
 import type { RatingItem } from './models/rating-item.type'
 import { useGameClient } from './hooks/use-game-client'
 import { AuthView } from './views/AuthView'
@@ -25,6 +25,7 @@ const applyTheme = (theme: AppTheme): void => {
 
 const PHASE_TIMER_SECONDS: Record<GamePhase, number | null> = {
   lobby: null,
+  'opening-writing': 60,
   writing: 180,
   voting: 25,
   rating: 30,
@@ -87,6 +88,7 @@ function App(): ReactElement {
     executeJoinRoom,
     executeStartGame,
     executeRestartGame,
+    executeSubmitOpening,
     executeSubmitAnswers,
     executeCastVote,
     executeSubmitRatings,
@@ -98,6 +100,10 @@ function App(): ReactElement {
   const [roundCount, setRoundCount] = useState<number>(DEFAULT_ROUNDS)
   const [botCount, setBotCount] = useState<number>(DEFAULT_BOTS)
   const [testMode, setTestMode] = useState<boolean>(false)
+  const [openingsMode, setOpeningsMode] = useState<OpeningsMode>('ai')
+  const [openingText, setOpeningText] = useState<string>('')
+  const [openingDirty, setOpeningDirty] = useState<boolean>(false)
+  const [openingBtnPulse, setOpeningBtnPulse] = useState<boolean>(false)
   const [answers, setAnswers] = useState<[string, string]>(['', ''])
   const [ratings, setRatings] = useState<Record<string, number>>({})
   const [ratingsSubmittedLocally, setRatingsSubmittedLocally] = useState<boolean>(false)
@@ -125,6 +131,17 @@ function App(): ReactElement {
     return [gameState.prompts[firstIndex] ?? '', gameState.prompts[secondIndex] ?? '']
   }, [gameState?.prompts, myAssignment])
   const canStart = Boolean(me?.isHost && gameState?.phase === 'lobby')
+  const isHumanOpenings = gameState?.openingsMode === 'human'
+  const hasSubmittedOpening = Boolean(
+    session &&
+      gameState?.phase === 'opening-writing' &&
+      (gameState.openingSubmitters ?? []).includes(session.playerId)
+  )
+  const canSubmitOpening = Boolean(
+    gameState?.phase === 'opening-writing' &&
+      openingText.trim().length >= 6 &&
+      (!hasSubmittedOpening || openingDirty)
+  )
   const hasSubmittedAnswers = Boolean(
     session &&
       gameState?.phase === 'writing' &&
@@ -229,6 +246,13 @@ function App(): ReactElement {
   }, [token, user, session, gameState, autoJoinAttempted, executeJoinRoom])
 
   useEffect(() => {
+    if (gameState?.phase === 'opening-writing') {
+      setOpeningText(gameState.myOpening ?? '')
+      setOpeningDirty(false)
+    }
+  }, [gameState?.phase])
+
+  useEffect(() => {
     if (gameState?.phase === 'writing') {
       setAnswers(['', ''])
       setAnswersDirty(false)
@@ -295,7 +319,19 @@ function App(): ReactElement {
 
   const handleCreateRoom = (): void => {
     const isAdmin: boolean = user?.role === 'admin'
-    executeCreateRoom({ roundCount, botCount, testMode: isAdmin ? testMode : undefined })
+    executeCreateRoom({ roundCount, botCount, testMode: isAdmin ? testMode : undefined, openingsMode })
+  }
+
+  const handleSubmitOpening = (): void => {
+    if (!session || !canSubmitOpening) {
+      return
+    }
+    setOpeningBtnPulse(true)
+    window.setTimeout(() => {
+      setOpeningBtnPulse(false)
+    }, 420)
+    setOpeningDirty(false)
+    executeSubmitOpening({ roomCode: session.roomCode, text: openingText.trim() })
   }
 
   const handleJoinRoom = (): void => {
@@ -472,6 +508,16 @@ function App(): ReactElement {
                 <option value={2}>2</option>
               </select>
             </label>
+            <label className="inputGroup">
+              <span>Начала пишет</span>
+              <select
+                value={openingsMode}
+                onChange={(event) => setOpeningsMode(event.target.value as OpeningsMode)}
+              >
+                <option value="ai">ИИ</option>
+                <option value="human">Игроки</option>
+              </select>
+            </label>
           </div>
           {user?.role === 'admin' && (
             <label className="inputGroup" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -514,7 +560,11 @@ function App(): ReactElement {
               {gameState.testMode && <span style={{ marginLeft: 8, fontSize: '0.6em', color: '#f59e0b' }}>TEST</span>}
             </h1>
             <p className="subtitle">
-              Раунд {Math.max(gameState.roundIndex, 1)} из {gameState.roundCount}
+              Раунд{' '}
+              {gameState.phase === 'opening-writing'
+                ? gameState.roundIndex + 1
+                : Math.max(gameState.roundIndex, 1)}{' '}
+              из {gameState.roundCount}
             </p>
           </div>
           <div className="headerActions">
@@ -570,27 +620,34 @@ function App(): ReactElement {
             <button className="secondary copyLinkBtn" onClick={handleCopyRoomLink}>
               {linkCopied ? 'Ссылка скопирована!' : 'Скопировать ссылку на комнату'}
             </button>
-            <div className={`aiStatusBadge aiStatus-${gameState.aiStatus}`}>
-              {gameState.aiStatus === 'generating' && (
-                <>
-                  <span className="aiSpinner" aria-hidden />
-                  <span>AI готовит начала шуток...</span>
-                </>
-              )}
-              {gameState.aiStatus === 'ready' && (
-                <>
-                  <span className="aiCheck" aria-hidden>✨</span>
-                  <span>Шутки готовы — можно начинать!</span>
-                </>
-              )}
-              {gameState.aiStatus === 'idle' && (
-                <span>Ожидание начала генерации...</span>
-              )}
-            </div>
+            {isHumanOpenings ? (
+              <div className="aiStatusBadge aiStatus-ready">
+                <span className="aiCheck" aria-hidden>✍️</span>
+                <span>Режим: начала шуток пишут игроки</span>
+              </div>
+            ) : (
+              <div className={`aiStatusBadge aiStatus-${gameState.aiStatus}`}>
+                {gameState.aiStatus === 'generating' && (
+                  <>
+                    <span className="aiSpinner" aria-hidden />
+                    <span>AI готовит начала шуток...</span>
+                  </>
+                )}
+                {gameState.aiStatus === 'ready' && (
+                  <>
+                    <span className="aiCheck" aria-hidden>✨</span>
+                    <span>Шутки готовы — можно начинать!</span>
+                  </>
+                )}
+                {gameState.aiStatus === 'idle' && (
+                  <span>Ожидание начала генерации...</span>
+                )}
+              </div>
+            )}
             {canStart && (
               <button
                 className="primary"
-                disabled={isStartingGame || gameState.aiStatus === 'generating'}
+                disabled={isStartingGame || (!isHumanOpenings && gameState.aiStatus === 'generating')}
                 onClick={() => {
                   setIsStartingGame(true)
                   executeStartGame({ roomCode: session.roomCode })
@@ -601,13 +658,55 @@ function App(): ReactElement {
                     <span className="aiSpinner aiSpinnerInline" aria-hidden />
                     Запускаем игру...
                   </>
-                ) : gameState.aiStatus === 'generating' ? (
+                ) : !isHumanOpenings && gameState.aiStatus === 'generating' ? (
                   'Ждём AI...'
                 ) : (
                   'Начать игру'
                 )}
               </button>
             )}
+          </div>
+        )}
+
+        {gameState.phase === 'opening-writing' && (
+          <div className={`phaseBlock ${hasSubmittedOpening ? 'phaseSuccess' : ''}`}>
+            <h2>Придумай начало шутки</h2>
+            <p className="subtitle">
+              Незаконченное предложение с обрывом на самом интересном месте — «и тут», «но»,
+              «а потом» или просто тире. Продолжение допишет другой игрок.
+            </p>
+            {hasSubmittedOpening && (
+              <p className="confirmBanner">
+                Начало отправлено — можно исправить, пока идёт фаза
+              </p>
+            )}
+            <div className="inputGroup">
+              <textarea
+                value={openingText}
+                onChange={(event) => {
+                  setOpeningDirty(true)
+                  setOpeningText(event.target.value)
+                }}
+                maxLength={200}
+                placeholder="Например: Вчера в лифте я встретил соседа, и он..."
+              />
+            </div>
+            <button
+              type="button"
+              className={`primary ${hasSubmittedOpening ? 'btnSuccess' : ''} ${openingBtnPulse ? 'btnPulse' : ''}`}
+              disabled={!canSubmitOpening}
+              onClick={handleSubmitOpening}
+            >
+              {hasSubmittedOpening
+                ? openingDirty
+                  ? 'Обновить начало'
+                  : 'Отправлено'
+                : 'Отправить начало'}
+            </button>
+            <p className="subtitle">
+              Отправили: {(gameState.openingSubmitters ?? []).length} из{' '}
+              {gameState.players.filter((player) => !player.isBot).length}
+            </p>
           </div>
         )}
 
@@ -694,6 +793,12 @@ function App(): ReactElement {
               </div>
             )}
             <h2 className="duelPrompt">{gameState.currentDuel.prompt}</h2>
+            {gameState.currentDuel.openingAuthorPlayerId && (
+              <p className="subtitle">
+                Начало придумал(а):{' '}
+                {getPlayerNameById(gameState.players, gameState.currentDuel.openingAuthorPlayerId)}
+              </p>
+            )}
             {hasVotedCurrentDuel && myVoteSide && !isDuelParticipant && (
               <p className="voteStatus">
                 Ваш голос: {myVoteSide === 'left' ? 'A' : 'B'}

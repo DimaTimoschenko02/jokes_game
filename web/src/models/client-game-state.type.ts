@@ -1,6 +1,6 @@
 import type { ClientDuel } from './client-duel.type'
 import type { ClientPlayer } from './client-player.type'
-import type { GamePhase } from './game-phase.type'
+import type { GamePhase, OpeningsMode } from './game-phase.type'
 import type { PlayerPromptAssignment } from './player-prompt-assignment.type'
 import type { RatingItem } from './rating-item.type'
 
@@ -16,6 +16,9 @@ export type ClientGameState = {
   readonly duelIndex: number
   readonly duelCount: number
   readonly votingRevealActive: boolean
+  readonly openingsMode: OpeningsMode
+  readonly openingSubmitters: readonly string[]
+  readonly myOpening: string | null
   readonly writingSubmitters: readonly string[]
   readonly ratingSubmitters: readonly string[]
   readonly ratingItems: readonly RatingItem[]

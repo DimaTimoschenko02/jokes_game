@@ -15,7 +15,8 @@
 //   HEADED=1 node e2e/play-smoke.mjs        # watch it play
 //   BASE_URL=http://localhost:5173 node e2e/play-smoke.mjs
 //
-// Env: BASE_URL, ROUNDS, BOTS, HEADED, TEST_ROOM(=1 default), SLOWMO(ms)
+// Env: BASE_URL, ROUNDS, BOTS, HEADED, TEST_ROOM(=1 default), SLOWMO(ms),
+//      SMOKE_MODE(ai|human — human plays the "players write openings" mode)
 
 import { chromium } from 'playwright'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -32,6 +33,7 @@ const BOTS = Number(process.env.BOTS ?? 2)
 const HEADED = process.env.HEADED === '1'
 const TEST_ROOM = process.env.TEST_ROOM !== '0'
 const SLOWMO = Number(process.env.SLOWMO ?? 0)
+const SMOKE_MODE = process.env.SMOKE_MODE === 'human' ? 'human' : 'ai'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'e2ePassw0rd'
 
 const PLAYERS = [
@@ -128,6 +130,12 @@ async function createRoom(page) {
   await page.getByRole('combobox', { name: 'Боты' }).selectOption(String(BOTS)).catch(async () => {
     await page.locator('select').nth(1).selectOption(String(BOTS))
   })
+  if (SMOKE_MODE === 'human') {
+    await page.getByRole('combobox', { name: 'Начала пишет' }).selectOption('human').catch(async () => {
+      await page.locator('select').nth(2).selectOption('human')
+    })
+    log('host: openings mode = human')
+  }
 
   if (TEST_ROOM) {
     const checkbox = page.locator('input[type="checkbox"]')
@@ -157,9 +165,11 @@ async function joinRoom(page, code) {
 }
 
 async function startGame(page) {
-  // wait for AI openings ready (or start button enabled)
-  const ready = page.getByText('Шутки готовы — можно начинать!')
-  await ready.waitFor({ timeout: 90000 }).catch(() => log('host: AI-ready badge not seen, trying start anyway'))
+  // wait for AI openings ready (or start button enabled); human mode starts instantly
+  if (SMOKE_MODE !== 'human') {
+    const ready = page.getByText('Шутки готовы — можно начинать!')
+    await ready.waitFor({ timeout: 90000 }).catch(() => log('host: AI-ready badge not seen, trying start anyway'))
+  }
   const startBtn = page.getByRole('button', { name: 'Начать игру' })
   await startBtn.waitFor({ timeout: 90000 })
   await startBtn.click()
@@ -170,6 +180,7 @@ async function startGame(page) {
 async function detectPhase(page) {
   const checks = [
     ['finished', page.getByRole('heading', { name: 'Игра окончена!' })],
+    ['opening-writing', page.getByRole('heading', { name: 'Придумай начало шутки' })],
     ['writing', page.getByRole('heading', { name: 'Закончи оба предложения' })],
     ['rating', page.getByRole('heading', { name: 'Оцени шутки' })],
     ['scoreboard', page.getByRole('heading', { name: 'Раунд завершён' })],
@@ -180,6 +191,19 @@ async function detectPhase(page) {
     if (await loc.first().isVisible().catch(() => false)) return name
   }
   return 'unknown'
+}
+
+async function doOpeningWriting(page, who) {
+  const submit = page.getByRole('button', { name: 'Отправить начало' })
+  if (!(await submit.isVisible().catch(() => false))) return // already submitted
+  const area = page.locator('textarea[placeholder^="Например:"]')
+  if (await area.isEditable().catch(() => false)) {
+    await area.fill(`${who} тестовое начало про кота ${Math.floor(Math.random() * 1e4)}, но`)
+  }
+  if (await submit.isEnabled().catch(() => false)) {
+    await submit.click()
+    log(`${who}: opening submitted`)
+  }
 }
 
 async function doWriting(page, who) {
@@ -239,7 +263,8 @@ async function drivePlayer(page, who, bucket, deadline) {
       idle = 0
     }
     if (phase === 'finished') return 'finished'
-    if (phase === 'writing') await doWriting(page, who)
+    if (phase === 'opening-writing') await doOpeningWriting(page, who)
+    else if (phase === 'writing') await doWriting(page, who)
     else if (phase === 'voting') await doVoting(page, who)
     else if (phase === 'rating') await doRating(page, who)
     // scoreboard / lobby / unknown -> just wait
@@ -298,6 +323,7 @@ async function main() {
 
     const report = {
       base: BASE_URL,
+      mode: SMOKE_MODE,
       rounds: ROUNDS,
       bots: BOTS,
       testRoom: TEST_ROOM,

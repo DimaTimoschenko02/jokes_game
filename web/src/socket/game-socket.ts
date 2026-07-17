@@ -7,6 +7,7 @@ export type CreateRoomPayload = {
   readonly roundCount: number
   readonly botCount: number
   readonly testMode?: boolean
+  readonly openingsMode?: 'ai' | 'human'
 }
 
 export type JoinRoomPayload = {
@@ -15,6 +16,11 @@ export type JoinRoomPayload = {
 
 export type StartGamePayload = {
   readonly roomCode: string
+}
+
+export type SubmitOpeningPayload = {
+  readonly roomCode: string
+  readonly text: string
 }
 
 export type SubmitAnswersPayload = {
@@ -105,6 +111,10 @@ export class GameSocket {
 
   public executeRestartGame(payload: StartGamePayload): void {
     this.socket.emit('restartGame', payload)
+  }
+
+  public executeSubmitOpening(payload: SubmitOpeningPayload): void {
+    this.socket.emit('submitOpening', payload)
   }
 
   public executeSubmitAnswers(payload: SubmitAnswersPayload): void {
