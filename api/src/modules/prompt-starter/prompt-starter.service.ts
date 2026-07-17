@@ -38,6 +38,14 @@ export class PromptStarterService {
     return this.fillFromFallback(entries.map((e) => e.text), input.count, input.excludedTexts)
   }
 
+  public saveHumanOpening(input: { readonly text: string; readonly authorUserId: string }): void {
+    void this.repository.upsertHumanOpening(input).catch((error: unknown) => {
+      this.logger.warn(
+        `save_human_opening_failed text="${input.text.slice(0, 60)}" error=${error instanceof Error ? error.message : String(error)}`
+      )
+    })
+  }
+
   public pushCompletion(input: PushCompletionInput): void {
     void this.repository.pushCompletion(input).catch((error: unknown) => {
       this.logger.warn(`push_completion_failed prompt="${input.promptText.slice(0, 60)}" error=${error instanceof Error ? error.message : String(error)}`)

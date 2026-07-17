@@ -60,6 +60,16 @@ export class PromptStarterRepository {
     })
   }
 
+  public async upsertHumanOpening(input: {
+    readonly text: string
+    readonly authorUserId: string
+  }): Promise<void> {
+    await this.db
+      .insert(promptStarters)
+      .values({ text: input.text, source: 'human', authorUserId: input.authorUserId })
+      .onConflictDoNothing({ target: promptStarters.text })
+  }
+
   public async pushCompletion(input: PushCompletionInput): Promise<void> {
     const total: number = input.votesFor + input.votesAgainst
     const voteShare: number = total > 0 ? input.votesFor / total : 0.5

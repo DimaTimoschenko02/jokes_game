@@ -57,6 +57,13 @@
       "when": 1779395844429,
       "tag": "0007_sturdy_captain_britain",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784302220292,
+      "tag": "0008_talented_jimmy_woo",
+      "breakpoints": true
     }
   ]
 }
