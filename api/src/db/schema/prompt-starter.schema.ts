@@ -17,6 +17,8 @@ export const promptStarters = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     text: text('text').notNull(),
+    source: text('source').notNull().default('ai'),
+    authorUserId: text('author_user_id'),
     usedCount: integer('used_count').notNull().default(0),
     isGolden: boolean('is_golden').notNull().default(false),
     averageCompletionRating: real('average_completion_rating'),
