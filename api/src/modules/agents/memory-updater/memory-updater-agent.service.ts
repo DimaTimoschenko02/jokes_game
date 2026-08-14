@@ -74,11 +74,13 @@ export class MemoryUpdaterAgentService {
       '',
       'Верни JSON: {"updates": {}, "groupMemoryDelta": { ... }}.',
       '- updates оставь пустым объектом {} — память игроков уже обновлена по раундам.',
-      '- groupMemoryDelta — только ИЗМЕНЕНИЯ относительно текущей памяти компании выше.'
+      '- groupMemoryDelta — только ИЗМЕНЕНИЯ относительно текущей памяти компании выше.',
+      '- КЛЮЧИ groupMemoryDelta строго такие (суффикс Delta обязателен, другие имена отбрасываются):',
+      '  themesDelta, inJokesDelta, triggersDelta, avoidedThemesDelta, setupPatternsDelta.'
     ]
     if (input.summaryRequested) {
       lines.push(
-        '- Также верни newSummaryText: 4-8 предложений свободного саммари про компанию (то, что не лезет в структурные поля). Не повторяй дословно то, что уже в themes/inJokes/triggers.'
+        '- Также верни newSummaryText: 4-8 предложений свободного саммари про компанию (то, что не лезет в структурные поля). Не повторяй дословно то, что уже в themesDelta/inJokesDelta/triggersDelta.'
       )
     } else {
       lines.push('- newSummaryText НЕ возвращай в этот раз.')
