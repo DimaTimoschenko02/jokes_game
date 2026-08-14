@@ -84,10 +84,16 @@ const normalizeGroupDeltaKeys = (value: unknown): unknown => {
   }
   const source = value as Record<string, unknown>
   const normalized: Record<string, unknown> = {}
+  // First pass: canonical keys win outright, whatever order they arrived in.
   for (const [key, entry] of Object.entries(source)) {
-    const canonical: string = GROUP_DELTA_KEY_ALIASES[key] ?? key
-    // An explicit canonical key always wins over its alias.
-    if (normalized[canonical] === undefined) {
+    if (GROUP_DELTA_KEY_ALIASES[key] === undefined) {
+      normalized[key] = entry
+    }
+  }
+  // Second pass: aliases only fill slots the canonical keys left empty.
+  for (const [key, entry] of Object.entries(source)) {
+    const canonical: string | undefined = GROUP_DELTA_KEY_ALIASES[key]
+    if (canonical !== undefined && normalized[canonical] === undefined) {
       normalized[canonical] = entry
     }
   }
