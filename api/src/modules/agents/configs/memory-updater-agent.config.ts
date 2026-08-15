@@ -64,7 +64,43 @@ const userMemoryDeltaSchema = z
   })
   .strict()
 
-const groupMemoryDeltaSchema = z
+/**
+ * The model keeps returning group delta keys without the `Delta` suffix, mirroring the field
+ * names it sees in the rendered current-memory block. A whole game's group memory used to be
+ * dropped over that mismatch, so normalize the known aliases before validation.
+ */
+const GROUP_DELTA_KEY_ALIASES: Readonly<Record<string, string>> = {
+  themes: 'themesDelta',
+  inJokes: 'inJokesDelta',
+  triggers: 'triggersDelta',
+  avoidedThemes: 'avoidedThemesDelta',
+  setupPatterns: 'setupPatternsDelta',
+  summaryText: 'newSummaryText'
+}
+
+const normalizeGroupDeltaKeys = (value: unknown): unknown => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value
+  }
+  const source = value as Record<string, unknown>
+  const normalized: Record<string, unknown> = {}
+  // First pass: canonical keys win outright, whatever order they arrived in.
+  for (const [key, entry] of Object.entries(source)) {
+    if (GROUP_DELTA_KEY_ALIASES[key] === undefined) {
+      normalized[key] = entry
+    }
+  }
+  // Second pass: aliases only fill slots the canonical keys left empty.
+  for (const [key, entry] of Object.entries(source)) {
+    const canonical: string | undefined = GROUP_DELTA_KEY_ALIASES[key]
+    if (canonical !== undefined && normalized[canonical] === undefined) {
+      normalized[canonical] = entry
+    }
+  }
+  return normalized
+}
+
+const groupMemoryDeltaShape = z
   .object({
     themesDelta: z
       .array(
@@ -118,6 +154,8 @@ const groupMemoryDeltaSchema = z
     newSummaryText: z.string().min(1).max(2000).optional()
   })
   .strict()
+
+const groupMemoryDeltaSchema = z.preprocess(normalizeGroupDeltaKeys, groupMemoryDeltaShape)
 
 export const MEMORY_UPDATER_OUTPUT_SCHEMA: ZodType<MemoryUpdaterOutput> = z.object({
   updates: z.record(z.string().min(1), userMemoryDeltaSchema),
